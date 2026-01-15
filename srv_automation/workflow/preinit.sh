@@ -10,7 +10,7 @@ echo "--- Step 1/5: Wait for cloud-init to finish ---"
 ./srv_automation/atomic/wait_for_cloud_init.sh
 
 echo "--- Step 2/5: Update and upgrade system packages ---"
-./srv_automation/atomic/upgrade_and_update.sh
+./srv_automation/atomic/update_and_upgrade.sh
 
 echo "--- Step 3/5: Ensure scripts have executable permissions ---"
 ./srv_automation/composite/set_script_runable_permissions.sh
