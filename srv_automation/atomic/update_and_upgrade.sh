@@ -11,3 +11,4 @@ echo "Upgrading packages..."
 sudo apt upgrade -y
 
 echo "Done updating and upgrading packages."
+
