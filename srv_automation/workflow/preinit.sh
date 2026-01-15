@@ -13,7 +13,7 @@ echo "--- Step 2/5: Update and upgrade system packages ---"
 ./srv_automation/atomic/update_and_upgrade.sh
 
 echo "--- Step 3/5: Ensure scripts have executable permissions ---"
-./srv_automation/composite/set_script_runable_permissions.sh
+./srv_automation/composite/set_script_runnable_permissions.sh
 
 echo "--- Step 4/5: Enable cgroups (requires reboot) ---"
 ./srv_automation/atomic/enable_cgroups.sh
