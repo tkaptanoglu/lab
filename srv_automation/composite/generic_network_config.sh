@@ -6,9 +6,6 @@ set -euo pipefail
 
 echo "=== Applying generic network configuration ==="
 
-echo "--- Configuring hostname ---"
-./srv_automation/atomic/configure_hostname.sh
-
 echo "--- Configuring DNS ---"
 ./srv_automation/atomic/configure_dns.sh
 
