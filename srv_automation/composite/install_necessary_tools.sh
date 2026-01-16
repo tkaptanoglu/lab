@@ -15,8 +15,8 @@ echo "--- Step 2: Network tools ---"
 echo "--- Step 3: Security tools ---"
 ./srv_automation/atomic/install_security_tools.sh
 
-echo "--- Step 4: Installing and logging in to Tailscale VPN ---"
-./srv_automation/atomic/install_tailscale_vpn.sh
+echo "--- Step 4: Installing and logging in to VPN of choice ---"
+./srv_automation/atomic/install_vpn.sh
 
 echo "=== Finished installation of necessary tools ==="
 
