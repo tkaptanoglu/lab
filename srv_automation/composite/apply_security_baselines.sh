@@ -16,8 +16,11 @@ echo "--- VPN Setup (NOTE: Human involvement is required!) ---"
 echo "--- Firewall setup ---"
 ./srv_automation/composite/configure_firewall.sh
 
+echo "--- Install public SSH key(s) ---"
+./srv_automation/atomic/install_ssh_key_from_github.sh
+
 echo "--- SSH hardening ---"
-./srv_automation/composite/ssh_hardening.sh
+./srv_automation/atomic/ssh_hardening.sh
 
 echo "=== Security baselines applied successfully. ==="
 
