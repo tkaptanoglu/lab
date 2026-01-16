@@ -8,10 +8,10 @@ set -euo pipefail
 echo "=== Applying security baselines ==="
 
 echo "--- Automated patching ---"
-./srv_automation/automatic/automated_patching.sh
+./srv_automation/atomic/automated_patching.sh
 
 echo "--- VPN Setup (NOTE: Human involvement is required!) ---"
-./srv_automation/automatic/install_vpn.sh
+./srv_automation/atomic/install_vpn.sh
 
 echo "--- Firewall setup ---"
 ./srv_automation/composite/configure_firewall.sh
