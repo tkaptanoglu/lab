@@ -6,7 +6,7 @@ set -euo pipefail
 
 # NOTE: If you wish to redefine what 'necessary package' means, please modify the relevant atomics.
 echo "=== Step 1/4: Install necessary packages"
-./srv/automation/composite/install_necessary_tools.sh
+./srv_automation/composite/install_necessary_tools.sh
 
 # Security baselines: Automated patching, VPN, firewall, SSH hardening
 echo "=== Step 2/4: Apply security baselines"
