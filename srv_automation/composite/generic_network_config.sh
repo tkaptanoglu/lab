@@ -6,11 +6,11 @@ set -euo pipefail
 
 echo "=== Applying generic network configuration ==="
 
-echo "--- Applying generic sysctl network tuning"
+echo "--- Applying generic sysctl network tuning ---"
 ./srv_automation/atomic/sysctl_generic_network_tuning.sh
 
-echo "--- Ensuring network services are enabled"
+echo "--- Ensuring network services are enabled ---"
 ./srv_automation/atomic/ensure_network_services_enabled.sh
 
-echo "=== Generic network configuration complete"
+echo "=== Generic network configuration complete ==="
 
