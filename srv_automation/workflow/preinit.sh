@@ -26,6 +26,6 @@ echo "--- Step 5/6: Enable cgroups (requires reboot) ---"
 # enable_cgroups.sh may already reboot the system.
 # If it does NOT reboot, this ensures a reboot happens.
 
-echo "--- Step 5/6: Reboot the system ---"
+echo "--- Step 6/6: Reboot the system ---"
 ./srv_automation/atomic/reboot.sh
 
