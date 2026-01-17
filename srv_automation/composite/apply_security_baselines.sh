@@ -22,5 +22,8 @@ echo "--- Install public SSH key(s) ---"
 echo "--- SSH hardening ---"
 ./srv_automation/atomic/ssh_hardening.sh
 
+echo "--- Install and configure Falco ---"
+./srv_automation/composite/setup_falco.sh
+
 echo "=== Security baselines applied successfully. ==="
 
