@@ -10,8 +10,8 @@ echo "=== Applying security baselines ==="
 echo "--- Automated patching ---"
 ./srv_automation/atomic/automated_patching.sh
 
-echo "--- Firewall setup ---"
-./srv_automation/atomic/configure_firewall.sh
+echo "--- Firewall setup (skipping) ---"
+# ./srv_automation/atomic/configure_firewall.sh
 
 echo "--- SSH hardening ---"
 ./srv_automation/atomic/ssh_hardening.sh
