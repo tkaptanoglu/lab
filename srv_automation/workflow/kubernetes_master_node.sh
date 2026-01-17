@@ -19,7 +19,7 @@ echo "--- Step 3/4: Allow scheduling on this node (untaint) ---"
 ./srv_automation/atomic/untaint_control_plane_node.sh
 
 echo "--- Step 4/4: Printing worker join command ---"
-./srv_automation/atomic/print_worker_join_command.sh
+./srv_automation/composite/print_worker_join_command.sh
 
 echo "=== Kubernetes Master Node Workflow: COMPLETE ==="
 
