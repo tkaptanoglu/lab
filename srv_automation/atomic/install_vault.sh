@@ -26,7 +26,7 @@ sudo apt install -y vault
 vault --version
 
 # Create Vault user and directories
-sudo useradd --system --home /etc/vault.d --shell /bin/false vault
+id -u vault >/dev/null 2>&1 || sudo useradd --system --home /etc/vault.d --shell /bin/false vault
 sudo mkdir -p /etc/vault.d /var/lib/vault/data
 sudo chown -R vault:vault /etc/vault.d /var/lib/vault
 sudo chmod 750 /var/lib/vault/data
