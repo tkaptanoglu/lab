@@ -16,8 +16,8 @@ echo "--- Firewall setup (skipping) ---"
 echo "--- SSH hardening ---"
 ./srv_automation/atomic/ssh_hardening.sh
 
-echo "--- Install and configure Falco ---"
-./srv_automation/composite/setup_falco.sh
+echo "--- Install and configure Falco (skipping) ---"
+# ./srv_automation/composite/setup_falco.sh
 
 echo "=== Security baselines applied successfully. ==="
 
