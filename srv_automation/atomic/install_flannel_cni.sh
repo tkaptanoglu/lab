@@ -1,11 +1,15 @@
 #!/bin/bash
-# composite/install_flannel_cni.sh
-# Purpose: Install Flannel CNI on the cluster
+# atomic/install_flannel_cni.sh
+# Purpose: Install Flannel CNI for Kubernetes
 
 set -euo pipefail
 
-echo "--- Flannel CNI: Installing ---"
-./srv_automation/atomic/apply_flannel_manifest.sh
+echo "Installing Flannel CNI..."
 
-echo "--- Flannel CNI: COMPLETE ---"
+FLANNEL_MANIFEST_URL="https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml"
+
+# Apply Flannel manifest
+kubectl apply -f "$FLANNEL_MANIFEST_URL"
+
+echo "Flannel CNI installation complete."
 
