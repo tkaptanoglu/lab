@@ -8,7 +8,7 @@ echo "Installing Tailscale VPN..."
 # Install Tailscale using the official install script
 curl -fsSL https://tailscale.com/install.sh | sh
 
-echo "Starting Tailscale VPN..."
+echo "Starting Tailscale VPN... (HUMAN INVOLVEMENT IS NEEDED!)"
 # Bring up the Tailscale service
 sudo tailscale up
 

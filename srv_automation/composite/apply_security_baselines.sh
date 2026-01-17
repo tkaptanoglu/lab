@@ -10,9 +10,6 @@ echo "=== Applying security baselines ==="
 echo "--- Automated patching ---"
 ./srv_automation/atomic/automated_patching.sh
 
-echo "--- VPN Setup (NOTE: Human involvement is required!) ---"
-./srv_automation/atomic/install_vpn.sh
-
 echo "--- Firewall setup ---"
 ./srv_automation/atomic/configure_firewall.sh
 
