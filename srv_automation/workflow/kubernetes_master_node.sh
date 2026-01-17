@@ -13,13 +13,13 @@ echo "--- Step 1/4: Initializing Kubernetes control plane ---"
 ./srv_automation/composite/kubeadm_init_control_plane.sh
 
 echo "--- Step 2/4: Installing Flannel CNI ---"
-./srv_automation/composite/install_flannel_cni.sh
+./srv_automation/atomic/install_flannel_cni.sh
 
 echo "--- Step 3/4: Allow scheduling on this node (untaint) ---"
-./srv_automation/composite/untaint_control_plane_node.sh
+./srv_automation/atomic/untaint_control_plane_node.sh
 
 echo "--- Step 4/4: Printing worker join command ---"
-./srv_automation/composite/print_worker_join_command.sh
+./srv_automation/atomic/print_worker_join_command.sh
 
 echo "=== Kubernetes Master Node Workflow: COMPLETE ==="
 
