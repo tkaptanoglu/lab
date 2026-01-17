@@ -16,8 +16,8 @@ echo "--- Step 3/7: Ensure scripts have executable permissions ---"
 ./srv_automation/composite/set_script_runnable_permissions.sh
 
 # Vault installation is a part of preinit because other scripts will need secrets.
-echo "--- Step 4/7: Install Vault ---"
-./srv_automation/atomic/install_vault.sh
+echo "--- Step 4/7: Install Vault (skipping) ---"
+#./srv_automation/atomic/install_vault.sh
 
 echo "--- Step 5/7: Enable cgroups (requires reboot) ---"
 ./srv_automation/atomic/enable_cgroups.sh

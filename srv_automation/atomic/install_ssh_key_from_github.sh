@@ -23,8 +23,9 @@ sudo chmod 600 "$AUTHORIZED_KEYS"
 sudo chown "$USER":"$USER" "$AUTHORIZED_KEYS"
 
 # Download the public key from GitHub
-GITHUB_USERNAME="$(vault kv get -field=github_username secret/identity)"
-GITHUB_KEY_URL="https://github.com/${GITHUB_USERNAME}.keys"
+# GITHUB_USERNAME="$(vault kv get -field=github_username secret/identity)"
+# GITHUB_KEY_URL="https://github.com/${GITHUB_USERNAME}.keys"
+GITHUB_KEY_URL="https://github.com/tkaptanoglu.keys"
 
 # Add each key to authorized_keys if not already present
 curl -fsSL "$GITHUB_KEY_URL" | while read -r key; do
