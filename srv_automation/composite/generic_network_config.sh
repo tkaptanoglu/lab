@@ -6,9 +6,6 @@ set -euo pipefail
 
 echo "=== Applying generic network configuration ==="
 
-echo "--- Configuring DNS ---"
-./srv_automation/atomic/configure_dns.sh
-
 echo "--- Applying generic sysctl network tuning"
 ./srv_automation/atomic/sysctl_generic_network_tuning.sh
 
