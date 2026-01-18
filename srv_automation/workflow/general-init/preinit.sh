@@ -13,7 +13,7 @@ echo "--- Step 2/7: Update and upgrade system packages ---"
 ./srv_automation/atomic/update_and_upgrade.sh
 
 echo "--- Step 3/7: Ensure scripts have executable permissions ---"
-./srv_automation/composite/set_script_runnable_permissions.sh
+./srv_automation/composite/bootstrap/set_script_runnable_permissions.sh
 
 # Vault installation is a part of preinit because other scripts will need secrets.
 echo "--- Step 4/7: Install Vault (skipping) ---"

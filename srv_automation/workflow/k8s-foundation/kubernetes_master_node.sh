@@ -9,17 +9,30 @@ set -euo pipefail
 
 echo "=== Kubernetes Master Node Workflow: START ==="
 
-echo "--- Step 1/4: Initializing Kubernetes control plane ---"
-./srv_automation/composite/kubeadm_init_control_plane.sh
 
+# START: CONTROL PLANE
+echo "--- Step 1/4: Initializing Kubernetes control plane ---"
+./srv_automation/composite/k8s/control-plane/kubeadm_init_control_plane.sh
+# END: CONTROL PLANE
+
+
+# START: CNI
 echo "--- Step 2/4: Installing Flannel CNI ---"
 ./srv_automation/atomic/install_flannel_cni.sh
+# END: CNI
 
+
+# START: UNTAINT
 echo "--- Step 3/4: Allow scheduling on this node (untaint) ---"
 ./srv_automation/atomic/untaint_control_plane_node.sh
+# END: UNTAINT
 
+
+# START: CLUSTER FORMING
 echo "--- Step 4/4: Exporting worker join command ---"
-./srv_automation/composite/export_worker_join_command.sh
+./srv_automation/composite/k8s/cluster-forming/export_worker_join_command.sh
+# END: CLUSTER FORMING
+
 
 echo "=== Kubernetes Master Node Workflow: COMPLETE ==="
 

@@ -6,17 +6,29 @@ set -euo pipefail
 
 echo "=== Navidrome Service Workflow: START ==="
 
-echo "--- Step 1/4: Setting up external storage ---"
-./srv_automation/composite/setup_external_drive.sh
 
+# START: STORAGE
+echo "--- Step 1/4: Setting up external storage ---"
+./srv_automation/composite/storage/setup_external_drive.sh
+# END: STORAGE
+
+
+# START: NAMESPACE
 echo "--- Step 2/4: Apply music namespace ---"
 ./srv_automation/atomic/apply_music_namespace.sh
+# END: NAMESPACE
 
+# START: K8S STORAGE
 echo "--- Step 3/4: Applying PersistentVolume and PersistentVolumeClaim ---"
-./srv_automation/composite/apply_music_storage.sh
+./srv_automation/composite/k8s/storage/apply_music_storage.sh
+# END: K8S STORAGE
 
+
+# START: DEPLOY NAVIDROME
 echo "--- Step 4/4: Deploying Navidrome application ---"
-./srv_automation/composite/deploy_navidrome.sh
+./srv_automation/composite/k8s/services/deploy_navidrome.sh
+# END: DEPLOY NAVIDROME
+
 
 echo "=== Navidrome Service Workflow: COMPLETE ==="
 
