@@ -5,11 +5,6 @@
 
 set -euo pipefail
 
-if [ "${EXPORT_JOIN_COMMAND_HTTP:-false}" != "true" ]; then
-  echo "HTTP export not enabled (set EXPORT_JOIN_COMMAND_HTTP=true to enable)."
-  exit 0
-fi
-
 echo "Enabling HTTP export for join command (port 8022)..."
 
 OUT_DIR="/var/lib/srv_automation/k8s"
