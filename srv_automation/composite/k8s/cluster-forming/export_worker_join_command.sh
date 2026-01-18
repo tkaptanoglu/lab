@@ -5,10 +5,10 @@
 set -euo pipefail
 
 echo "--- Join Command Export: Generating and persisting join command ---"
-./srv_automation/atomic/generate_and_store_join_command.sh
+./srv_automation/atomic/k8s/cluster-formation/generate_and_store_join_command.sh
 
 echo "--- Join Command Export: Optionally enabling HTTP export service ---"
-./srv_automation/atomic/enable_join_command_http_export.sh
+./srv_automation/atomic/k8s/cluster-formation/enable_join_command_http_export.sh
 
 echo "--- Join Command Export: COMPLETE ---"
 

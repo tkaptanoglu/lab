@@ -12,11 +12,11 @@ if [ -f /etc/kubernetes/admin.conf ]; then
   echo "Control plane already initialized (/etc/kubernetes/admin.conf exists). Skipping kubeadm init."
 else
   echo "--- kubeadm init: Initializing control plane (pod CIDR for Flannel) ---"
-  ./srv_automation/atomic/kubeadm_init.sh
+  ./srv_automation/atomic/k8s/control-plane/kubeadm_init.sh
 fi
 
 echo "--- kubeadm init: Configuring kubectl for current user ---"
-./srv_automation/atomic/configure_kubectl_for_user.sh
+./srv_automation/atomic/k8s/control-plane/configure_kubectl_for_user.sh
 
 echo "--- kubeadm init: COMPLETE ---"
 

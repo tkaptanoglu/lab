@@ -5,13 +5,13 @@
 set -euo pipefail
 
 echo "--- Step 1: Mounting external drive (/dev/sda1 -> /mnt/external) ---"
-./srv_automation/atomic/mount_external_drive.sh
+./srv_automation/atomic/storage/mount/mount_external_drive.sh
 
 echo "--- Step 2: Installing Samba ---"
-./srv_automation/atomic/install_samba.sh
+./srv_automation/atomic/storage/share/install_samba.sh
 
 echo "--- Step 3: Exposing external drive over the network ---"
-./srv_automation/atomic/expose_drive_over_network.sh
+./srv_automation/atomic/storage/share/expose_drive_over_network.sh
 
 echo "--- External Drive Setup: COMPLETE ---"
 

@@ -13,19 +13,16 @@ echo "=== Kubernetes Master Node Workflow: START ==="
 # START: CONTROL PLANE
 echo "--- Step 1/4: Initializing Kubernetes control plane ---"
 ./srv_automation/composite/k8s/control-plane/kubeadm_init_control_plane.sh
+
+echo "--- Step 2/4: Allow scheduling on this node (untaint) ---"
+./srv_automation/atomic/k8s/control-plane/untaint_control_plane_node.sh
 # END: CONTROL PLANE
 
 
-# START: CNI
-echo "--- Step 2/4: Installing Flannel CNI ---"
-./srv_automation/atomic/install_flannel_cni.sh
-# END: CNI
-
-
-# START: UNTAINT
-echo "--- Step 3/4: Allow scheduling on this node (untaint) ---"
-./srv_automation/atomic/untaint_control_plane_node.sh
-# END: UNTAINT
+# START: NETWORKING
+echo "--- Step 3/4: Installing Flannel CNI ---"
+./srv_automation/atomic/k8s/networking/install_flannel_cni.sh
+# END: NETWORKING
 
 
 # START: CLUSTER FORMING

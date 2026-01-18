@@ -15,8 +15,9 @@ echo "--- Step 1/4: Setting up external storage ---"
 
 # START: NAMESPACE
 echo "--- Step 2/4: Apply music namespace ---"
-./srv_automation/atomic/apply_music_namespace.sh
+./srv_automation/atomic/apps/navidrome/apply_music_namespace.sh
 # END: NAMESPACE
+
 
 # START: K8S STORAGE
 echo "--- Step 3/4: Applying PersistentVolume and PersistentVolumeClaim ---"

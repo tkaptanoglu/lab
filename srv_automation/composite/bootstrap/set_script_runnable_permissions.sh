@@ -7,13 +7,13 @@ set -euo pipefail
 echo "=== Setting runnable permissions for automation scripts ==="
 
 echo "--- Atomics ---"
-./srv_automation/atomic/set_atomic_runnable_permissions.sh
+./srv_automation/atomic/bootstrap/set_atomic_runnable_permissions.sh
 
 echo "--- Composites ---"
-./srv_automation/atomic/set_composite_runnable_permissions.sh
+./srv_automation/atomic/bootstrap/set_composite_runnable_permissions.sh
 
 echo "--- Workflows ---"
-./srv_automation/atomic/set_workflow_runnable_permissions.sh
+./srv_automation/atomic/bootstrap/set_workflow_runnable_permissions.sh
 
 echo "=== Finished setting runnable permissions ==="
 

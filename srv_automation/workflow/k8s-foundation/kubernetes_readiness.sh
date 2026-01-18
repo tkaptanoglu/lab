@@ -7,13 +7,10 @@ set -euo pipefail
 echo "--- Kubernetes Readiness Workflow: START ---"
 
 
-# START: SWAPOFF
-echo "--- Step 1/4: Disabling swap ---"
-./srv_automation/atomic/swapoff.sh
-# END: SWAPOFF
-
-
 # START: PREREQUISITES
+echo "--- Step 1/4: Disabling swap ---"
+./srv_automation/atomic/k8s/prerequisites/swapoff.sh
+
 echo "--- Step 2/4: Configuring kernel modules and sysctl settings for Kubernetes ---"
 ./srv_automation/composite/k8s/prerequisites/k8s_prerequisites.sh
 
