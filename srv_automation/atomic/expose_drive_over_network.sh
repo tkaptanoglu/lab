@@ -1,7 +1,7 @@
 #!/bin/bash
 # atomic/expose_drive_over_network.sh
 # Purpose: Expose /mnt/external over the network via Samba (SMB) for Windows access,
-#          with Tailscale access preferred (bind to tailscale0 IP if present).
+#          with Tailscale access preferred (bind to tailscale0 if present).
 
 set -euo pipefail
 
@@ -34,7 +34,6 @@ if sudo grep -qF "$MARK_BEGIN" "$SMB_CONF"; then
 fi
 
 # Append srv_automation share block (auth required; no guest)
-# Note: valid users is set to the current username (most reliable default).
 sudo tee -a "$SMB_CONF" > /dev/null <<EOF
 
 ${MARK_BEGIN}
@@ -49,33 +48,31 @@ ${MARK_BEGIN}
 ${MARK_END}
 EOF
 
-# Bind Samba explicitly to IPs (Tailscale preferred + wlan0 if present).
-# IMPORTANT: Samba is much more reliable with explicit IPs than interface names for tailscale0.
-TAILSCALE_IP="$(ip -o -4 addr show dev tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
-WLAN_IP="$(ip -o -4 addr show dev wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
+# Build interface binding using interface NAMES (works better with tailscale /32)
+IFACES=("lo")
 
-BIND_LINE="interfaces = lo"
-if [ -n "$TAILSCALE_IP" ]; then
-  BIND_LINE+=" ${TAILSCALE_IP}"
-fi
-if [ -n "$WLAN_IP" ]; then
-  BIND_LINE+=" ${WLAN_IP}"
+if ip link show tailscale0 >/dev/null 2>&1; then
+  IFACES+=("tailscale0")
 fi
 
-# If we have at least one non-lo IP, enforce binding. Otherwise, don't restrict.
-if [ "$BIND_LINE" != "interfaces = lo" ]; then
-  echo "Configuring Samba to listen on: ${BIND_LINE}"
+if ip link show wlan0 >/dev/null 2>&1; then
+  IFACES+=("wlan0")
+fi
 
-  # Ensure [global] exists (it should). Insert/replace interfaces line.
+# If we have more than just lo, enforce binding
+if [ "${#IFACES[@]}" -gt 1 ]; then
+  echo "Configuring Samba to listen on interfaces: ${IFACES[*]}"
+
+  # Replace or insert 'interfaces = ...'
   if sudo grep -qE '^\s*interfaces\s*=' "$SMB_CONF"; then
-    sudo sed -i "s|^\s*interfaces\s*=.*|   ${BIND_LINE}|" "$SMB_CONF"
+    sudo sed -i "s|^\s*interfaces\s*=.*|   interfaces = ${IFACES[*]}|" "$SMB_CONF"
   else
     sudo sed -i "/^\[global\]/a\\
-   ${BIND_LINE}
+   interfaces = ${IFACES[*]}
 " "$SMB_CONF"
   fi
 
-  # Insert/replace bind interfaces only
+  # Replace or insert 'bind interfaces only = yes'
   if sudo grep -qE '^\s*bind interfaces only\s*=' "$SMB_CONF"; then
     sudo sed -i "s|^\s*bind interfaces only\s*=.*|   bind interfaces only = yes|" "$SMB_CONF"
   else
@@ -84,7 +81,7 @@ if [ "$BIND_LINE" != "interfaces = lo" ]; then
 " "$SMB_CONF"
   fi
 else
-  echo "No tailscale0 or wlan0 IPv4 detected; not restricting Samba interfaces."
+  echo "No tailscale0 or wlan0 detected; not restricting Samba interfaces."
 fi
 
 # Validate Samba config before restart
@@ -101,20 +98,25 @@ sudo systemctl restart nmbd
 echo "Verifying Samba listeners..."
 sudo ss -tlnp | grep smbd || true
 
+# Ensure it's listening on the Tailscale IP (if tailscale0 exists)
+TAILSCALE_IP="$(ip -o -4 addr show dev tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
 if [ -n "$TAILSCALE_IP" ]; then
   if ! sudo ss -tlnp | grep -q "${TAILSCALE_IP}:445"; then
     echo "ERROR: smbd is not listening on Tailscale IP ${TAILSCALE_IP}:445"
-    echo "Check /etc/samba/smb.conf [global] interfaces/bind settings and restart smbd."
+    echo "Next checks:"
+    echo "  - Confirm tailscale0 has the IP: ip -4 addr show tailscale0"
+    echo "  - Confirm smb.conf [global] has: interfaces = lo tailscale0 [wlan0] and bind interfaces only = yes"
     exit 1
   fi
 fi
 
-echo "Samba share configured: \\\\${TAILSCALE_IP:-<server-ip>}\\${SHARE_NAME}"
-echo "From Windows (Tailscale): \\\\${TAILSCALE_IP:-<tailscale-ip>}\\${SHARE_NAME}"
-echo "From Windows (LAN):       \\\\${WLAN_IP:-<lan-ip>}\\${SHARE_NAME}"
+WLAN_IP="$(ip -o -4 addr show dev wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
+
+echo "Samba share configured:"
+echo "  From Windows (Tailscale): \\\\${TAILSCALE_IP:-<tailscale-ip>}\\${SHARE_NAME}"
+echo "  From Windows (LAN):       \\\\${WLAN_IP:-<lan-ip>}\\${SHARE_NAME}"
 echo "NOTE: You must create a Samba password for your user (one-time):"
 echo "  sudo smbpasswd -a ${USER}"
-echo "Then access from Windows with username '${USER}'."
 
 echo "Drive exposure over Samba complete."
 
