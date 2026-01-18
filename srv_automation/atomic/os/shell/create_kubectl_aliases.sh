@@ -26,6 +26,8 @@ alias kl='kubectl logs'
 ${MARKER_END}
 EOF
 
-echo "Kubectl aliases added. To activate them now, run:"
-echo "  source ~/.bashrc"
+echo "Kubectl aliases added."
+
+source ~/.bashrc
+echo "Kubectl aliases activated."
 
