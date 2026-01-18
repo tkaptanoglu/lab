@@ -1,7 +1,11 @@
 #!/bin/bash
 # atomic/expose_drive_over_network.sh
-# Purpose: Expose /mnt/external over the network via Samba (SMB) for Windows access,
-#          with Tailscale access preferred (bind to tailscale0 if present).
+# Purpose: Expose /mnt/external over Samba (SMB) and make it reachable over Tailscale.
+#
+# Key idea:
+# - Samba listens on localhost/LAN (works reliably)
+# - Tailscale Serve forwards tailnet TCP/445 -> localhost:445
+#   so \\100.x.y.z\external works from anywhere on your tailnet.
 
 set -euo pipefail
 
@@ -19,7 +23,7 @@ if ! mountpoint -q "$SHARE_PATH"; then
   exit 1
 fi
 
-# Ensure Samba is installed (safe if already installed)
+# Ensure Samba is installed
 sudo apt update
 sudo apt install -y samba
 
@@ -48,75 +52,39 @@ ${MARK_BEGIN}
 ${MARK_END}
 EOF
 
-# Build interface binding using interface NAMES (works better with tailscale /32)
-IFACES=("lo")
-
-if ip link show tailscale0 >/dev/null 2>&1; then
-  IFACES+=("tailscale0")
-fi
-
-if ip link show wlan0 >/dev/null 2>&1; then
-  IFACES+=("wlan0")
-fi
-
-# If we have more than just lo, enforce binding
-if [ "${#IFACES[@]}" -gt 1 ]; then
-  echo "Configuring Samba to listen on interfaces: ${IFACES[*]}"
-
-  # Replace or insert 'interfaces = ...'
-  if sudo grep -qE '^\s*interfaces\s*=' "$SMB_CONF"; then
-    sudo sed -i "s|^\s*interfaces\s*=.*|   interfaces = ${IFACES[*]}|" "$SMB_CONF"
-  else
-    sudo sed -i "/^\[global\]/a\\
-   interfaces = ${IFACES[*]}
-" "$SMB_CONF"
-  fi
-
-  # Replace or insert 'bind interfaces only = yes'
-  if sudo grep -qE '^\s*bind interfaces only\s*=' "$SMB_CONF"; then
-    sudo sed -i "s|^\s*bind interfaces only\s*=.*|   bind interfaces only = yes|" "$SMB_CONF"
-  else
-    sudo sed -i "/^\[global\]/a\\
-   bind interfaces only = yes
-" "$SMB_CONF"
-  fi
-else
-  echo "No tailscale0 or wlan0 detected; not restricting Samba interfaces."
-fi
-
 # Validate Samba config before restart
 echo "Validating Samba config..."
 sudo testparm -s > /dev/null
 
 # Enable and restart Samba services
 sudo systemctl enable smbd >/dev/null 2>&1 || true
-sudo systemctl restart smbd
 sudo systemctl enable nmbd >/dev/null 2>&1 || true
+sudo systemctl restart smbd
 sudo systemctl restart nmbd
 
-# Verify listeners
-echo "Verifying Samba listeners..."
+echo "Verifying Samba listeners (local/LAN)..."
 sudo ss -tlnp | grep smbd || true
 
-# Ensure it's listening on the Tailscale IP (if tailscale0 exists)
-TAILSCALE_IP="$(ip -o -4 addr show dev tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
-if [ -n "$TAILSCALE_IP" ]; then
-  if ! sudo ss -tlnp | grep -q "${TAILSCALE_IP}:445"; then
-    echo "ERROR: smbd is not listening on Tailscale IP ${TAILSCALE_IP}:445"
-    echo "Next checks:"
-    echo "  - Confirm tailscale0 has the IP: ip -4 addr show tailscale0"
-    echo "  - Confirm smb.conf [global] has: interfaces = lo tailscale0 [wlan0] and bind interfaces only = yes"
-    exit 1
-  fi
-fi
-
-WLAN_IP="$(ip -o -4 addr show dev wlan0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
-
-echo "Samba share configured:"
-echo "  From Windows (Tailscale): \\\\${TAILSCALE_IP:-<tailscale-ip>}\\${SHARE_NAME}"
-echo "  From Windows (LAN):       \\\\${WLAN_IP:-<lan-ip>}\\${SHARE_NAME}"
 echo "NOTE: You must create a Samba password for your user (one-time):"
 echo "  sudo smbpasswd -a ${USER}"
+
+# --- Tailscale exposure: forward tailnet TCP/445 to localhost:445 ---
+if command -v tailscale >/dev/null 2>&1 && ip link show tailscale0 >/dev/null 2>&1; then
+  TAILSCALE_IP="$(ip -o -4 addr show dev tailscale0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1 || true)"
+  if [ -n "$TAILSCALE_IP" ]; then
+    echo "Enabling Tailscale Serve TCP forwarder: tailnet:445 -> localhost:445 ..."
+    # This publishes port 445 on the tailnet and forwards to local smbd.
+    # (Idempotent: re-running overwrites the same serve config.)
+    sudo tailscale serve --tcp 445 tcp://localhost:445
+
+    echo "Tailscale SMB access should work from Windows as:"
+    echo "  \\\\${TAILSCALE_IP}\\${SHARE_NAME}"
+  else
+    echo "tailscale0 present but no IPv4 detected; skipping tailscale serve."
+  fi
+else
+  echo "Tailscale not present; skipping tailscale serve."
+fi
 
 echo "Drive exposure over Samba complete."
 
