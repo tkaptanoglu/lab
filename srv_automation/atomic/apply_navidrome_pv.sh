@@ -6,7 +6,7 @@ set -euo pipefail
 
 echo "Applying PersistentVolume YAML..."
 
-kubectl apply -f ./k8s/pv.yaml
+kubectl apply -f ./manifests/navidrome/navidrome-pv.yaml
 
 echo "Verifying PersistentVolumes..."
 kubectl get pv

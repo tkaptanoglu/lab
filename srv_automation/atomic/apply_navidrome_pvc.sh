@@ -6,7 +6,7 @@ set -euo pipefail
 
 echo "Applying PersistentVolumeClaim YAML..."
 
-kubectl apply -f ./k8s/pvc.yaml
+kubectl apply -f ./manifests/navidrome/navidrome-pvc.yaml
 
 echo "Verifying PersistentVolumeClaims in namespace 'music'..."
 kubectl -n music get pvc
