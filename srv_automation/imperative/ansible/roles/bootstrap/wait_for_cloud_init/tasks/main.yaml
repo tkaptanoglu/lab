@@ -1,0 +1,20 @@
+---
+# Atomic: wait_for_cloud_init
+# Purpose: Wait for cloud-init to finish to avoid conflicts.
+
+- name: Check if cloud-init is installed
+  ansible.builtin.stat:
+    path: /usr/bin/cloud-init
+  register: cloud_init_bin
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  become: true
+  when: cloud_init_bin.stat.exists
+  changed_when: false
+
+- name: Warn if cloud-init is not installed (nothing to wait for)
+  ansible.builtin.debug:
+    msg: "cloud-init is not installed; skipping wait."
+  when: not cloud_init_bin.stat.exists
+
