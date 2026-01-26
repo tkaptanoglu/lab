@@ -5,10 +5,10 @@
 set -euo pipefail
 
 echo "--- containerd: Installing ---"
-./srv_automation/atomic/k8s/runtime/install_containerd.sh
+./srv_automation/imperative/shell/atomic/k8s/runtime/install_containerd.sh
 
 echo "--- containerd: Configuring (SystemdCgroup=true) and enabling service ---"
-./srv_automation/atomic/k8s/runtime/configure_containerd.sh
+./srv_automation/imperative/shell/atomic/k8s/runtime/configure_containerd.sh
 
 echo "--- containerd: COMPLETE ---"
 

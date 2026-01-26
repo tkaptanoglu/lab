@@ -5,10 +5,10 @@
 set -euo pipefail
 
 echo "--- Step 1: Applying PersistentVolume YAML and verifying ---"
-./srv_automation/atomic/apps/navidrome/apply_navidrome_pv.sh
+./srv_automation/imperative/shell/atomic/apps/navidrome/apply_navidrome_pv.sh
 
 echo "--- Step 2: Applying PersistentVolumeClaim YAML and verifying ---"
-./srv_automation/atomic/apps/navidrome/apply_navidrome_pvc.sh
+./srv_automation/imperative/shell/atomic/apps/navidrome/apply_navidrome_pvc.sh
 
 echo "--- Music Storage Apply: COMPLETE ---"
 

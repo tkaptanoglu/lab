@@ -5,16 +5,16 @@
 set -euo pipefail
 
 echo "--- Kubernetes Tools: Adding Kubernetes APT repository ---"
-./srv_automation/atomic/k8s/repos/add_k8s_repo.sh
+./srv_automation/imperative/shell/atomic/k8s/repos/add_k8s_repo.sh
 
 echo "--- Kubernetes Tools: Installing kubeadm, kubelet, and kubectl ---"
-./srv_automation/atomic/k8s/runtime/install_kube_tools.sh
+./srv_automation/imperative/shell/atomic/k8s/runtime/install_kube_tools.sh
 
 echo "--- Kubernetes Tools: Holding kubeadm, kubelet, and kubectl package versions ---"
-./srv_automation/atomic/k8s/runtime/hold_kube_packages.sh
+./srv_automation/imperative/shell/atomic/k8s/runtime/hold_kube_packages.sh
 
 echo "--- Post-install convenience: kubectl aliases in .bashrc ---"
-./srv_automation/atomic/os/shell/create_kubectl_aliases.sh
+./srv_automation/imperative/shellatomic/os/shell/create_kubectl_aliases.sh
 
 echo "--- Kubernetes Tools: COMPLETE ---"
 
