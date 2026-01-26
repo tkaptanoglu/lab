@@ -1,0 +1,7 @@
+---
+- name: Reboot for cgroups
+  ansible.builtin.reboot:
+    msg: "Rebooting to apply cgroup kernel cmdline changes"
+    reboot_timeout: "{{ enable_cgroups_reboot_timeout }}"
+  when: enable_cgroups_reboot | bool
+

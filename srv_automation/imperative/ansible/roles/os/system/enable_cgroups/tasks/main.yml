@@ -1,0 +1,48 @@
+---
+- name: Check cmdline.txt exists
+  ansible.builtin.stat:
+    path: "{{ enable_cgroups_cmdline_path }}"
+  register: cmdline_stat
+
+- name: Fail if cmdline.txt not found
+  ansible.builtin.fail:
+    msg: "Kernel cmdline file not found at {{ enable_cgroups_cmdline_path }} (is this a Raspberry Pi / Ubuntu image using /boot/firmware?)"
+  when: not cmdline_stat.stat.exists
+
+- name: Read current cmdline.txt
+  ansible.builtin.slurp:
+    path: "{{ enable_cgroups_cmdline_path }}"
+  register: cmdline_slurp
+
+- name: Compute updated cmdline line (append missing cgroup options)
+  ansible.builtin.set_fact:
+    cmdline_current: "{{ (cmdline_slurp.content | b64decode).strip() }}"
+    cmdline_updated: >-
+      {{
+        (cmdline_slurp.content | b64decode).strip()
+        ~
+        (
+          ' ' ~ (enable_cgroups_options
+                 | reject('in', (cmdline_slurp.content | b64decode).strip().split())
+                 | list
+                 | join(' ')
+                )
+          if (enable_cgroups_options
+              | reject('in', (cmdline_slurp.content | b64decode).strip().split())
+              | list
+              | length) > 0
+          else ''
+        )
+      }}
+
+- name: Update cmdline.txt with required cgroup options
+  ansible.builtin.copy:
+    dest: "{{ enable_cgroups_cmdline_path }}"
+    content: "{{ cmdline_updated }}\n"
+    owner: "{{ cmdline_stat.stat.pw_name | default('root') }}"
+    group: "{{ cmdline_stat.stat.gr_name | default('root') }}"
+    mode: "{{ '%04o' | format(cmdline_stat.stat.mode | int(base=8)) if cmdline_stat.stat.mode is defined else '0644' }}"
+    backup: true
+  when: cmdline_updated != cmdline_current
+  notify: Reboot for cgroups
+

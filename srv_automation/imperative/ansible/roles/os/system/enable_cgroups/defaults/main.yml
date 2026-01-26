@@ -1,0 +1,12 @@
+---
+enable_cgroups_cmdline_path: /boot/firmware/cmdline.txt
+
+enable_cgroups_options:
+  - cgroup_enable=cpuset
+  - cgroup_enable=memory
+  - cgroup_memory=1
+
+# The shell script mentions reboot; make it configurable.
+enable_cgroups_reboot: true
+enable_cgroups_reboot_timeout: 600
+

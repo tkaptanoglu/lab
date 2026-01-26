@@ -28,4 +28,5 @@
     - role: roles/bootstrap/wait_for_cloud_init
     - role: roles/bootstrap/update_and_upgrade
     - role: roles/vault
+    - role: roles/os/system/enable_cgroups
 
