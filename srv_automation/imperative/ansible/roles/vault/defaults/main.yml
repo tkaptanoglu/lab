@@ -1,5 +1,5 @@
 ---
-vault_version: "1.17.0"
+vault_version: ""
 vault_user: "vault"
 vault_group: "vault"
 vault_config_path: "/etc/vault.d"

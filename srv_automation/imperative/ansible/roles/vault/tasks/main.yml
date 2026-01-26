@@ -31,7 +31,10 @@
 
 - name: Install Vault
   ansible.builtin.apt:
-    name: "vault={{ vault_version }}"
+    name: >-
+      {{ 'vault=' ~ vault_version
+        if (vault_version | default('') | string | length) > 0
+        else 'vault' }}
     state: present
     update_cache: yes
 
