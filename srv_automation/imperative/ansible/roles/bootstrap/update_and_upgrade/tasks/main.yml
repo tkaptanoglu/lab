@@ -1,0 +1,20 @@
+---
+# roles/update_and_upgrade/tasks/main.yml
+# Purpose: Update package lists and upgrade all packages
+
+- name: Update apt package lists
+  become: yes
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Upgrade all installed packages
+  become: yes
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: yes
+    autoclean: yes
+
+- name: Report completion
+  ansible.builtin.debug:
+    msg: "Done updating and upgrading packages."
+

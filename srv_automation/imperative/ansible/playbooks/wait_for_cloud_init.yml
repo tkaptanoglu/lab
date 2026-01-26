@@ -1,0 +1,7 @@
+- name: Wait for cloud-init to finish
+  hosts: servers
+  gather_facts: false
+  become: true
+  roles:
+    - roles/bootstrap/wait_for_cloud_init
+
