@@ -1,0 +1,9 @@
+---
+reboot_message: "Rebooting the system (triggered by Ansible role reboot)"
+reboot_timeout: 600
+reboot_pre_delay: 0
+reboot_post_delay: 10
+
+# Optional: set to false to disable the reboot while keeping the role in a workflow.
+reboot_enabled: true
+

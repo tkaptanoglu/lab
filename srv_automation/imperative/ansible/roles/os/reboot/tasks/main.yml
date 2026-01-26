@@ -1,0 +1,9 @@
+---
+- name: Reboot the system
+  ansible.builtin.reboot:
+    msg: "{{ reboot_message }}"
+    reboot_timeout: "{{ reboot_timeout }}"
+    pre_reboot_delay: "{{ reboot_pre_delay }}"
+    post_reboot_delay: "{{ reboot_post_delay }}"
+  when: reboot_enabled | bool
+

@@ -8,25 +8,10 @@
   vars:
     ansible_python_interpreter: /usr/bin/python3
 
-  # Vault role vars
-  #  vault_version: "1.17.0"
-  #vault_data_path: "/opt/vault"
-  #vault_config:
-  #  ui: true
-  #  storage:
-  #    raft:
-  #      path: "/opt/vault"
-  #      node_id: "vault-{{ inventory_hostname }}"
-  #  listener:
-  #    tcp:
-  #      address: "0.0.0.0:8200"
-  #      tls_disable: "true"
-    # Better than ansible_host in some inventories:
-    #  api_addr: "http://{{ ansible_default_ipv4.address }}:8200"
-
   roles:
     - role: roles/bootstrap/wait_for_cloud_init
     - role: roles/bootstrap/update_and_upgrade
     - role: roles/vault
     - role: roles/os/system/enable_cgroups
+    - role: roles/os/reboot/reboot
 
