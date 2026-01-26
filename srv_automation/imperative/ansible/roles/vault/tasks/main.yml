@@ -1,0 +1,68 @@
+---
+- name: Ensure Vault group exists
+  ansible.builtin.group:
+    name: "{{ vault_group }}"
+    state: present
+
+- name: Ensure Vault user exists
+  ansible.builtin.user:
+    name: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+
+- name: Install dependencies
+  ansible.builtin.apt:
+    update_cache: yes
+    name:
+      - gpg
+      - apt-transport-https
+    state: present
+
+- name: Add Hashicorp GPG key
+  ansible.builtin.apt_key:
+    url: https://apt.releases.hashicorp.com/gpg
+    state: present
+
+- name: Add Hashicorp repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+    state: present
+
+- name: Install Vault
+  ansible.builtin.apt:
+    name: "vault={{ vault_version }}"
+    state: present
+    update_cache: yes
+
+- name: Create Vault config directory
+  ansible.builtin.file:
+    path: "{{ vault_config_path }}"
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    state: directory
+    mode: '0750'
+
+- name: Create Vault data directory
+  ansible.builtin.file:
+    path: "{{ vault_data_path }}"
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    state: directory
+    mode: '0750'
+
+- name: Deploy Vault configuration
+  ansible.builtin.template:
+    src: "vault.hcl.j2"
+    dest: "{{ vault_config_path }}/vault.hcl"
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    mode: '0640'
+  notify: Restart Vault
+
+- name: Enable and start Vault service
+  ansible.builtin.systemd:
+    name: vault
+    enabled: "{{ vault_service_enabled }}"
+    state: "{{ vault_service_state }}"
+

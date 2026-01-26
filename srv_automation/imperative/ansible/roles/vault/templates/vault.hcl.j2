@@ -1,0 +1,15 @@
+ui = {{ vault_config.ui }}
+
+storage "raft" {
+  path    = "{{ vault_config.storage.raft.path }}"
+  node_id = "{{ vault_config.storage.raft.node_id }}"
+}
+
+listener "tcp" {
+  address     = "{{ vault_config.listener.tcp.address }}"
+  tls_disable = {{ vault_config.listener.tcp.tls_disable }}
+}
+
+api_addr = "{{ vault_config.api_addr }}"
+cluster_addr = "{{ vault_config.api_addr }}"
+

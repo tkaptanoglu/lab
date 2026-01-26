@@ -1,0 +1,22 @@
+---
+vault_version: "1.17.0"
+vault_user: "vault"
+vault_group: "vault"
+vault_config_path: "/etc/vault.d"
+vault_data_path: "/opt/vault"
+vault_bin_path: "/usr/bin/vault"
+vault_service_state: started
+vault_service_enabled: true
+
+vault_config:
+  ui: true
+  storage:
+    raft:
+      path: "{{ vault_data_path }}"
+      node_id: "vault-node-1"
+  listener:
+    tcp:
+      address: "0.0.0.0:8200"
+      tls_disable: "true"
+  api_addr: "http://{{ ansible_host }}:8200"
+
