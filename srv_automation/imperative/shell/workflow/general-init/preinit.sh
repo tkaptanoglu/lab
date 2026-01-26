@@ -30,5 +30,5 @@ echo "--- Step 6/7: Install public SSH key(s) ---"
 # If it does NOT reboot, this ensures a reboot happens.
 
 echo "--- Step 7/7: Reboot the system ---"
-./srv_automation/imperative/shellatomic/os/reboot/reboot.sh
+./srv_automation/imperative/shell/atomic/os/reboot/reboot.sh
 
