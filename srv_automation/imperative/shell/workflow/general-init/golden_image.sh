@@ -11,24 +11,24 @@ echo "=== Golden Image creation started ==="
 # System configuration tweaks
 # NOTE: If you wish to redefine what 'necessary package' means, please modify the relevant atomics.
 echo "--- Step 1/4: Install necessary packages ---"
-./srv_automation/composite/os-baseline/install_necessary_tools.sh
+./srv_automation/imperative/shell/composite/os-baseline/install_necessary_tools.sh
 
 echo "--- Step 2/4: System configuration tweaks ---"
-./srv_automation/composite/os-baseline/system_config_tweaks.sh
+./srv_automation/imperative/shell/composite/os-baseline/system_config_tweaks.sh
 # END: OS BASELINE
 
 
 # START: SECURITY
 # Security baselines: Automated patching, VPN, firewall, SSH hardening
 echo "--- Step 3/4: Apply security baselines ---"
-./srv_automation/composite/security/apply_security_baselines.sh
+./srv_automation/imperative/shell/composite/security/apply_security_baselines.sh
 # END: SECURITY
 
 
 # START: NETWORKING
 # Generic network config: Hostname, DNS, generic sysctl tuning
 echo "--- Step 4/4: Configure generic network (skipping) ---"
-# ./srv_automation/composite/networking/generic_network_config.sh
+# ./srv_automation/imperative/shell/composite/networking/generic_network_config.sh
 # END: NETWORKING
 
 
