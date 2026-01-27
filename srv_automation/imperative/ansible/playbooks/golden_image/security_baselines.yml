@@ -30,4 +30,9 @@
 
         # Optional: background artifact updates (off by default)
         falco_enable_artifact_follow: false
+    - role: roles/security/patching
+      vars:
+        server_autopatch_origins:
+          - "o=Ubuntu,a=${distro_codename}-security"
+          - "o=Ubuntu,a=${distro_codename}-updates"
 

@@ -1,0 +1,12 @@
+# Managed by Ansible: servers_autopatch
+[Unit]
+Description=Daily unattended upgrades timer (servers-autopatch)
+
+[Timer]
+OnCalendar={{ servers_autopatch_on_calendar }}
+Persistent=true
+RandomizedDelaySec={{ servers_autopatch_randomized_delay_sec }}
+
+[Install]
+WantedBy=timers.target
+

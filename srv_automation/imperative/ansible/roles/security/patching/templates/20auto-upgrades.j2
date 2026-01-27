@@ -1,0 +1,6 @@
+// Managed by Ansible: servers_autopatch
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "{{ servers_autopatch_autoclean_interval_days }}";
+APT::Periodic::Unattended-Upgrade "1";
+

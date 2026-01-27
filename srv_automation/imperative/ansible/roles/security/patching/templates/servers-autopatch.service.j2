@@ -1,0 +1,13 @@
+# Managed by Ansible: servers_autopatch
+[Unit]
+Description=Run unattended upgrades (servers-autopatch)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/unattended-upgrade -v {{ servers_autopatch_extra_args }}
+# Log output to journal
+StandardOutput=journal
+StandardError=journal
+

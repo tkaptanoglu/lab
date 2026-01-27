@@ -1,0 +1,33 @@
+---
+# What repos to apply unattended upgrades from.
+# By default: security updates only (recommended).
+servers_autopatch_origins:
+  - "o=Ubuntu,a=${distro_codename}-security"
+
+# If you also want regular updates, uncomment this in your play vars:
+#  - "o=Ubuntu,a=${distro_codename}-updates"
+
+# Automatically remove unused dependencies
+servers_autopatch_remove_unused_deps: true
+
+# Automatically remove unused kernel packages
+servers_autopatch_remove_unused_kernel: true
+
+# Automatically remove unused dependencies (from apt) is controlled by apt itself too
+servers_autopatch_autoclean_interval_days: 7
+
+# Reboot behavior after upgrades that require it
+servers_autopatch_auto_reboot: true
+servers_autopatch_auto_reboot_time: "03:30"  # HH:MM (24h)
+
+# Email notifications (requires a local MTA if you really want mail delivered)
+servers_autopatch_mail_to: ""
+servers_autopatch_mail_only_on_error: true
+
+# Systemd timer schedule (daily) and random delay to spread load
+servers_autopatch_on_calendar: "daily"
+servers_autopatch_randomized_delay_sec: "45m"
+
+# Optional: extra apt options passed to unattended-upgrade when run by timer
+servers_autopatch_extra_args: ""
+

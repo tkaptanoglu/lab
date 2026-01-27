@@ -1,0 +1,11 @@
+---
+- name: restart unattended-upgrades
+  ansible.builtin.service:
+    name: unattended-upgrades
+    state: restarted
+  when: ansible_service_mgr == "systemd"
+
+- name: daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
