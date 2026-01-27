@@ -1,0 +1,9 @@
+---
+- name: System config tweaks
+  hosts: all
+  become: yes
+  roles:
+    - roles/os/system/ensure_time_sync
+    - roles/os/system/increase_file_limits
+    - roles/os/system/enable_persistent_journald
+
