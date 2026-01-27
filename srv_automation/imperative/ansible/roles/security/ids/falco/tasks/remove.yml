@@ -1,0 +1,52 @@
+---
+- name: Create policy-rc.d to prevent service actions during dpkg operations
+  ansible.builtin.copy:
+    dest: /usr/sbin/policy-rc.d
+    mode: "0755"
+    owner: root
+    group: root
+    content: |
+      #!/bin/sh
+      # Prevent init/systemd actions during package remove/purge
+      exit 101
+
+- name: Attempt apt removal first (may fail on ubuntu-raspi)
+  ansible.builtin.apt:
+    name:
+      - falco
+      - falcoctl
+      - falco-driver-loader
+    state: absent
+    purge: true
+    autoremove: true
+  register: falco_remove_apt
+  failed_when: false
+
+- name: Force-remove falco if apt removal failed (dpkg pre-rm can fail)
+  ansible.builtin.command:
+    cmd: "dpkg --remove --force-remove-reinstreq falco"
+  when: falco_remove_apt.rc != 0
+  register: falco_dpkg_remove
+  failed_when: false
+  changed_when: falco_dpkg_remove.rc == 0
+
+- name: Force-purge falco if still present
+  ansible.builtin.command:
+    cmd: "dpkg --purge --force-all falco"
+  when: falco_remove_apt.rc != 0
+  register: falco_dpkg_purge
+  failed_when: false
+  changed_when: falco_dpkg_purge.rc == 0
+
+- name: Fix broken dpkg state (if any)
+  ansible.builtin.command:
+    cmd: "apt-get -f install -y"
+  register: apt_fix
+  failed_when: false
+  changed_when: false
+
+- name: Remove policy-rc.d
+  ansible.builtin.file:
+    path: /usr/sbin/policy-rc.d
+    state: absent
+

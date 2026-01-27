@@ -1,0 +1,230 @@
+---
+- name: Assert Ubuntu on ARM64 (Raspberry Pi typical)
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_architecture in ["aarch64", "arm64"]
+    fail_msg: >-
+      This role is intended for Ubuntu on ARM64 (Raspberry Pi typical).
+      Detected: {{ ansible_distribution }} {{ ansible_distribution_version }} / {{ ansible_architecture }}
+
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Determine if Falco is installed
+  ansible.builtin.set_fact:
+    falco_is_installed: "{{ 'falco' in ansible_facts.packages }}"
+
+# ---------------------------------------------------------------------------
+# REMOVE (if installed): robust removal that works even when Falco prerm fails
+# ---------------------------------------------------------------------------
+- name: Remove existing Falco installation (robust purge)
+  block:
+    - name: Stop and disable Falco units (ignore missing)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - falco.service
+        - falco-modern-bpf.service
+        - falco-kmod.service
+        - falco-bpf.service
+        - falcoctl-artifact-follow.service
+      failed_when: false
+
+    # dpkg workaround: prevent service actions during remove/purge
+    - name: Create policy-rc.d to prevent service actions during dpkg operations
+      ansible.builtin.copy:
+        dest: /usr/sbin/policy-rc.d
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/sh
+          exit 101
+
+    - name: Try apt removal first (may fail due to Falco prerm on ubuntu-raspi)
+      ansible.builtin.apt:
+        name:
+          - falco
+          - falcoctl
+          - falco-driver-loader
+        state: absent
+        purge: "{{ falco_purge_on_remove | bool }}"
+        autoremove: true
+      register: falco_remove_apt
+      failed_when: false
+
+    - name: Force-remove falco package if apt removal failed
+      ansible.builtin.command:
+        cmd: "dpkg --remove --force-remove-reinstreq falco"
+      when: falco_remove_apt.rc is failed
+      register: falco_dpkg_remove
+      failed_when: false
+      changed_when: falco_dpkg_remove.rc == 0
+
+    - name: Force-purge falco package if still present
+      ansible.builtin.command:
+        cmd: "dpkg --purge --force-all falco"
+      when: falco_remove_apt.rc != 0
+      register: falco_dpkg_purge
+      failed_when: false
+      changed_when: falco_dpkg_purge.rc == 0
+
+    - name: Repair dpkg/apt state (safe if already clean)
+      ansible.builtin.command:
+        cmd: "apt-get -f install -y"
+      register: apt_fix
+      failed_when: false
+      changed_when: false
+
+    - name: Remove policy-rc.d
+      ansible.builtin.file:
+        path: /usr/sbin/policy-rc.d
+        state: absent
+
+    - name: Remove Falco probe cache (fresh driver build after reinstall)
+      ansible.builtin.file:
+        path: /root/.falco
+        state: absent
+      failed_when: false
+
+    - name: systemd daemon-reload after removal
+      ansible.builtin.systemd:
+        daemon_reload: true
+  when:
+    - falco_reinstall_if_present | bool
+    - falco_is_installed | bool
+
+# ---------------------------------------------------------------------------
+# INSTALL: repo + Falco
+# ---------------------------------------------------------------------------
+- name: Install prerequisites for repository setup
+  ansible.builtin.apt:
+    update_cache: yes
+    name:
+      - ca-certificates
+      - curl
+      - gpg
+    state: present
+
+- name: Download Falco GPG key (ASCII armor)
+  ansible.builtin.get_url:
+    url: "{{ falco_key_url }}"
+    dest: "/tmp/falcosecurity-packages.asc"
+    mode: "0644"
+
+- name: Dearmor Falco GPG key into apt keyring
+  ansible.builtin.command:
+    cmd: "gpg --dearmor -o {{ falco_keyring_path }} /tmp/falcosecurity-packages.asc"
+    creates: "{{ falco_keyring_path }}"
+
+- name: Ensure Falco apt repository is configured
+  ansible.builtin.copy:
+    dest: "{{ falco_apt_list_path }}"
+    content: "{{ falco_apt_repo }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Falco package (set driver choice to ebpf)
+  ansible.builtin.apt:
+    update_cache: yes
+    name: falco
+    state: present
+  environment:
+    FALCO_FRONTEND: "{{ falco_frontend }}"
+    FALCO_DRIVER_CHOICE: "ebpf"
+    FALCOCTL_ENABLED: "{{ falcoctl_enabled }}"
+
+# ---------------------------------------------------------------------------
+# eBPF probe: build/download via falcoctl (required on ubuntu-raspi kernels)
+# ---------------------------------------------------------------------------
+- name: Install eBPF build dependencies (for probe compilation)
+  ansible.builtin.apt:
+    update_cache: yes
+    name:
+      - clang
+      - llvm
+      - make
+      - gcc
+      - g++
+      - pkg-config
+      - libelf-dev
+      - zlib1g-dev
+      # headers are best-effort; falcoctl may still build even if auto-download script fails
+      - "linux-headers-{{ ansible_kernel }}"
+    state: present
+  when: falco_install_ebpf_build_deps | bool
+  failed_when: false
+
+- name: Stop Falco eBPF unit before installing probe
+  ansible.builtin.systemd:
+    name: falco-bpf.service
+    state: stopped
+  failed_when: false
+
+- name: Configure falcoctl driver to ebpf
+  ansible.builtin.command:
+    cmd: "falcoctl driver config --type ebpf"
+  changed_when: false
+
+- name: Install eBPF probe (download if exists; otherwise compile)
+  ansible.builtin.command:
+    cmd: "falcoctl --log-level debug driver install"
+  register: falcoctl_driver_install
+  changed_when: >-
+    (falcoctl_driver_install.stdout is search("eBPF probe available")) or
+    (falcoctl_driver_install.stdout is search("eBPF probe symlinked")) or
+    (falcoctl_driver_install.stdout is search("Downloading")) or
+    (falcoctl_driver_install.stdout is search("Trying to build eBPF probe"))
+  failed_when: falcoctl_driver_install.rc != 0
+
+# ---------------------------------------------------------------------------
+# Rules update: falcoctl artifact install falco-rules
+# ---------------------------------------------------------------------------
+- name: Update Falco rules using falcoctl artifact install
+  ansible.builtin.command:
+    cmd: "falcoctl artifact install {{ falco_rules_artifact }}:{{ falco_rules_tag }}"
+  register: falcoctl_rules_install
+  changed_when: true
+  when: falco_update_rules | bool
+
+# ---------------------------------------------------------------------------
+# Service selection: enforce falco-bpf.service; disable other units
+# ---------------------------------------------------------------------------
+- name: Disable other Falco units to avoid wrong engine (ignore missing)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop:
+    - falco-modern-bpf.service
+    - falco-kmod.service
+  failed_when: false
+
+- name: Enable and start Falco (classic eBPF unit)
+  ansible.builtin.systemd:
+    name: falco-bpf.service
+    enabled: "{{ falco_service_enabled | bool }}"
+    state: "{{ falco_service_state }}"
+    daemon_reload: true
+
+# Optional: enable artifact-follow service (auto updates artifacts, including rules)
+- name: Enable and start falcoctl artifact follow service (optional)
+  ansible.builtin.systemd:
+    name: falcoctl-artifact-follow.service
+    enabled: true
+    state: started
+  when: falco_enable_artifact_follow | bool
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# Post-check: show last driver install lines for debugging (useful on raspi)
+# ---------------------------------------------------------------------------
+- name: Debug falcoctl driver install output (last 30 lines)
+  ansible.builtin.debug:
+    msg: "{{ (falcoctl_driver_install.stdout_lines | default([]))[-30:] }}"
+

@@ -1,0 +1,36 @@
+---
+# Falco repo + key (official)
+falco_key_url: "https://falco.org/repo/falcosecurity-packages.asc"
+falco_keyring_path: "/usr/share/keyrings/falco-archive-keyring.gpg"
+falco_apt_repo: "deb [signed-by={{ falco_keyring_path }}] https://download.falco.org/packages/deb stable main"
+falco_apt_list_path: "/etc/apt/sources.list.d/falcosecurity.list"
+
+# Behavior
+falco_reinstall_if_present: true
+falco_purge_on_remove: true
+
+# Falco install prompts
+falco_frontend: "noninteractive"
+# Keep falcoctl enabled (needed for driver + rules management)
+falcoctl_enabled: ""
+
+# Driver/engine choice (final working approach on ubuntu-raspi)
+falco_driver_choice: "ebpf"  # enforced to ebpf by this role
+
+# Install deps needed to compile eBPF probe if no prebuilt exists
+falco_install_ebpf_build_deps: true
+
+# Rules management
+# Use falcoctl artifact to install/update the default rules
+falco_update_rules: true
+falco_rules_artifact: "falco-rules"
+# Optionally pin a tag (examples: "latest", "0", "0.5", "0.5.0", etc.)
+falco_rules_tag: "latest"
+
+# Services
+falco_service_enabled: true
+falco_service_state: started
+
+# Optionally enable falcoctl artifact follow service (auto-updates artifacts in background)
+falco_enable_artifact_follow: false
+

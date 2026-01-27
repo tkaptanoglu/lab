@@ -1,0 +1,11 @@
+---
+- name: systemd daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart falco-bpf
+  ansible.builtin.systemd:
+    name: falco-bpf.service
+    state: restarted
+  failed_when: false
+
