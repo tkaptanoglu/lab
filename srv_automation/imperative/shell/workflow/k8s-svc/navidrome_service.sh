@@ -15,7 +15,7 @@ echo "--- Step 1/4: Setting up external storage ---"
 
 # START: NAMESPACE
 echo "--- Step 2/4: Apply music namespace ---"
-./srv_automation/imperative/shell/atomic/apps/navidrome/apply_music_namespace.sh
+./srv_automation/imperative/shell/atomic/svc/navidrome/apply_music_namespace.sh
 # END: NAMESPACE
 
 
