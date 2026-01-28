@@ -15,7 +15,7 @@ echo "--- Step 2/4: Configuring kernel modules and sysctl settings for Kubernete
 ./srv_automation/imperative/shell/composite/k8s/prerequisites/k8s_prerequisites.sh
 
 echo "--- Step 3/4: Installing and configuring containerd ---"
-./srv_automation/imperative/shell/composite/k8s/prerequisites/install_containerd.sh
+./srv_automation/imperative/shell/composite/k8s/prerequisites/setup_containerd.sh
 # END: PREREQUISITES
 
 
