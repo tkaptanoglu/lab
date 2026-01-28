@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: enable_persistent_journald
+  description: Ensure systemd-journald logs persist across reboots (Storage=persistent)
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions: ["jammy"]
+dependencies: []
+

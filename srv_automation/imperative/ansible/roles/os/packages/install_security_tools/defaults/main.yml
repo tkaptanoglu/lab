@@ -1,0 +1,6 @@
+---
+security_tools_packages:
+  - ca-certificates
+  - apt-transport-https
+  - gpg
+

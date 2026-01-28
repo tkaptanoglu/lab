@@ -1,0 +1,25 @@
+---
+- name: Create persistent journald directory
+  ansible.builtin.file:
+    path: "{{ journald_persistent_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "2755"
+
+# Mirror "systemd-tmpfiles --create --prefix /var/log/journal"
+# This ensures tmpfiles rules are applied if present (non-fatal).
+- name: Apply tmpfiles rules for journald directory (best effort)
+  ansible.builtin.command: "systemd-tmpfiles --create --prefix {{ journald_persistent_dir }}"
+  changed_when: false
+  failed_when: false
+
+- name: Ensure journald uses persistent storage
+  ansible.builtin.lineinfile:
+    path: "{{ journald_conf_path }}"
+    regexp: '^\s*#?\s*Storage\s*='
+    line: "Storage={{ journald_storage_value }}"
+    create: false
+    backrefs: false
+  notify: restart journald
+

@@ -1,0 +1,9 @@
+---
+nofile_limits_path: "/etc/security/limits.d/99-custom-nofile.conf"
+
+nofile_limits:
+  - { domain: "*",    type: "soft", item: "nofile", value: "1048576" }
+  - { domain: "*",    type: "hard", item: "nofile", value: "1048576" }
+  - { domain: "root", type: "soft", item: "nofile", value: "1048576" }
+  - { domain: "root", type: "hard", item: "nofile", value: "1048576" }
+

@@ -1,0 +1,12 @@
+---
+- name: Render nofile limits file
+  ansible.builtin.copy:
+    dest: "{{ nofile_limits_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {% for r in nofile_limits %}
+      {{ r.domain }} {{ r.type }} {{ r.item }} {{ r.value }}
+      {% endfor %}
+

@@ -1,0 +1,26 @@
+---
+- name: Enable and start time sync service
+  ansible.builtin.systemd:
+    name: "{{ time_sync_service }}"
+    enabled: true
+    state: started
+
+- name: Ensure NTP is enabled (timedatectl)
+  ansible.builtin.command: timedatectl set-ntp true
+  when: time_sync_enable_ntp | bool
+  changed_when: false
+
+- name: Sanity check - system clock synchronized (non-fatal)
+  ansible.builtin.command: timedatectl status
+  register: timedatectl_status
+  changed_when: false
+  failed_when: false
+  when: time_sync_sanity_check | bool
+
+- name: Report sync status (non-fatal)
+  ansible.builtin.debug:
+    msg: >-
+      timedatectl reports:
+      {{ (timedatectl_status.stdout_lines | default([])) | select('search','System clock synchronized') | list | first | default('System clock synchronized line not found') }}
+  when: time_sync_sanity_check | bool
+

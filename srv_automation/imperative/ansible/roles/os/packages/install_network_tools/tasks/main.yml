@@ -1,0 +1,7 @@
+---
+- name: Install network tools packages
+  ansible.builtin.apt:
+    name: "{{ network_tools_packages }}"
+    state: present
+    update_cache: true
+

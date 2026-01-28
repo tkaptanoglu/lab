@@ -1,0 +1,10 @@
+---
+# Service used for time sync on Ubuntu
+time_sync_service: systemd-timesyncd
+
+# Whether to enable NTP via timedatectl
+time_sync_enable_ntp: true
+
+# Non-fatal sanity check for sync state
+time_sync_sanity_check: true
+

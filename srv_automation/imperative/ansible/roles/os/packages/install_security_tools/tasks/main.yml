@@ -1,0 +1,7 @@
+---
+- name: Install security/certificate tools packages
+  ansible.builtin.apt:
+    name: "{{ security_tools_packages }}"
+    state: present
+    update_cache: true
+

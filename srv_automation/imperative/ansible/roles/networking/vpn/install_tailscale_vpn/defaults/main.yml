@@ -1,0 +1,14 @@
+---
+tailscale_repo_dist: "jammy"
+tailscale_packages:
+  - tailscale
+
+# Optional: if set, role can bring tailscale up non-interactively
+tailscale_authkey: ""
+
+# Extra args for "tailscale up"
+tailscale_up_args: ""
+
+# Whether to run "tailscale up" automatically if authkey is provided
+tailscale_run_up: true
+

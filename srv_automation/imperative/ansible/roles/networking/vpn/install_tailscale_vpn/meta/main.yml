@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: tailscale_vpn
+  description: Install Tailscale VPN (apt repo) and enable tailscaled; optionally run tailscale up
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions: ["jammy"]
+dependencies: []
+

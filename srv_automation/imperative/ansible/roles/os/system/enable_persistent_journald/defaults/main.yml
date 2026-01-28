@@ -1,0 +1,6 @@
+---
+journald_persistent_dir: "/var/log/journal"
+journald_conf_path: "/etc/systemd/journald.conf"
+journald_storage_value: "persistent"
+journald_restart_service: "systemd-journald"
+

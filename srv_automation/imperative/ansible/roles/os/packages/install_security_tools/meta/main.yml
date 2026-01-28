@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: security_tools
+  description: Install security/certificate tools (ca-certificates, apt-transport-https, gpg)
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions: ["jammy"]
+dependencies: []
+

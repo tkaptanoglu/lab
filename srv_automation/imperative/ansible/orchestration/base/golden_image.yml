@@ -1,0 +1,9 @@
+---
+# orchestration/base/golden_image.yml
+# Purpose: Run full baseline in order
+
+- import_playbook: playbooks/preinit/preinit.yml
+- import_playbook: playbooks/general_config/golden_image/system_config_tweaks.yml
+- import_playbook: playbooks/general_config/golden_image/install_necessary_tools.yml
+- import_playbook: playbooks/general_config/golden_image/security_baselines.yml
+
