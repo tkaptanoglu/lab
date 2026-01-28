@@ -54,13 +54,14 @@
         state: absent
         purge: "{{ falco_purge_on_remove | bool }}"
         autoremove: true
+        lock_timeout: "{{ falco_apt_lock_timeout | default(600) }}"
       register: falco_remove_apt
       failed_when: false
 
     - name: Force-remove falco package if apt removal failed
       ansible.builtin.command:
         cmd: "dpkg --remove --force-remove-reinstreq falco"
-      when: falco_remove_apt.rc is failed
+      when: falco_remove_apt.rc != 0
       register: falco_dpkg_remove
       failed_when: false
       changed_when: falco_dpkg_remove.rc == 0
@@ -109,6 +110,7 @@
       - curl
       - gpg
     state: present
+    lock_timeout: "{{ falco_apt_lock_timeout | default(600) }}"
 
 - name: Download Falco GPG key (ASCII armor)
   ansible.builtin.get_url:
@@ -134,6 +136,7 @@
     update_cache: yes
     name: falco
     state: present
+    lock_timeout: "{{ falco_apt_lock_timeout | default(600) }}"
   environment:
     FALCO_FRONTEND: "{{ falco_frontend }}"
     FALCO_DRIVER_CHOICE: "ebpf"
@@ -157,6 +160,7 @@
       # headers are best-effort; falcoctl may still build even if auto-download script fails
       - "linux-headers-{{ ansible_kernel }}"
     state: present
+    lock_timeout: "{{ falco_apt_lock_timeout | default(600) }}"
   when: falco_install_ebpf_build_deps | bool
   failed_when: false
 
