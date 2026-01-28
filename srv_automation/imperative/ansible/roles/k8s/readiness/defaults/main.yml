@@ -1,0 +1,12 @@
+---
+# Which non-root user should receive kubectl aliases in ~/.bashrc
+# Defaults to the SSH user when possible.
+kubernetes_readiness_target_user: "{{ ansible_user_id }}"
+
+# Kubernetes repo stream (must match your exact commands/values)
+kubernetes_readiness_k8s_deb_repo: "https://pkgs.k8s.io/core:/stable:/v1.35/deb/"
+kubernetes_readiness_k8s_key_url: "https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key"
+
+# Containerd package name on Debian/Ubuntu
+kubernetes_readiness_containerd_pkg: "containerd"
+

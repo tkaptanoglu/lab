@@ -1,0 +1,12 @@
+---
+- name: Kubernetes node readiness
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: k8s/readiness
+      # Optional: set which user gets the kubectl aliases in ~/.bashrc
+      # vars:
+      #   kubernetes_readiness_target_user: "ubuntu"
+

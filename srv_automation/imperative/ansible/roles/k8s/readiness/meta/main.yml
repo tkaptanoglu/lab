@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: kubernetes_readiness
+  author: your_name
+  description: Prepare a node for Kubernetes (swap off, kernel/modules/sysctl, containerd, kube tools, aliases)
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions: ["all"]
+    - name: Ubuntu
+      versions: ["all"]
+dependencies: []
+

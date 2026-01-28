@@ -1,0 +1,190 @@
+---
+- name: Ensure this role runs on Debian/Ubuntu (APT-based)
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "kubernetes_readiness currently supports Debian/Ubuntu (APT-based) only."
+
+# 1) Disable swap and verify it's off
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  become: true
+  changed_when: false
+
+- name: Comment out swap entries in /etc/fstab (persistently disable swap)
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!#)(.*\s+swap\s+.*)$'
+    replace: '# \1'
+  become: true
+
+- name: Verify swap is off (swapon --show should be empty)
+  ansible.builtin.command: swapon --show
+  register: kubernetes_readiness_swapon
+  become: true
+  changed_when: false
+
+- name: Fail if swap is still enabled
+  ansible.builtin.fail:
+    msg: "Swap is still enabled:\n{{ kubernetes_readiness_swapon.stdout }}"
+  when: kubernetes_readiness_swapon.stdout | trim != ""
+
+# 2) k8s prerequisites
+# - Load kernel modules and ensure they load on boot
+- name: Ensure kernel modules load on boot for Kubernetes
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
+  become: true
+
+- name: Load kernel module overlay now
+  ansible.builtin.command: modprobe overlay
+  become: true
+  changed_when: false
+
+- name: Load kernel module br_netfilter now
+  ansible.builtin.command: modprobe br_netfilter
+  become: true
+  changed_when: false
+
+# - Add sysctl settings to /etc/sysctl.d/k8s.conf and apply
+- name: Configure sysctl params required by Kubernetes
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/k8s.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+  become: true
+  notify: Reload sysctl
+
+# 3) Install and configure containerd
+- name: Install containerd
+  ansible.builtin.apt:
+    name: "{{ kubernetes_readiness_containerd_pkg }}"
+    state: present
+    update_cache: true
+  become: true
+
+- name: Ensure /etc/containerd exists
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Create default containerd config if missing
+  ansible.builtin.command: containerd config default
+  register: kubernetes_readiness_containerd_default
+  changed_when: false
+  become: true
+
+- name: Write /etc/containerd/config.toml (SystemdCgroup=true)
+  ansible.builtin.copy:
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ kubernetes_readiness_containerd_default.stdout | regex_replace('SystemdCgroup = false', 'SystemdCgroup = true') }}"
+  become: true
+  notify:
+    - Enable and start containerd
+    - Restart containerd
+
+# 4) Install kube
+# - Add k8s repos, MUST be these commands and these values exactly
+- name: Add Kubernetes repo (exact commands requested)
+  ansible.builtin.shell: |
+    sudo apt update
+    sudo apt install -y apt-transport-https ca-certificates curl gpg
+    sudo mkdir -p /etc/apt/keyrings
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
+    sudo apt update
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: false
+
+- name: Install kubelet, kubeadm, kubectl
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    update_cache: false
+  become: true
+  notify: Enable kubelet
+
+- name: "Enable kubelet (exact request: systemctl enable kubelet)"
+  ansible.builtin.command: systemctl enable kubelet
+  become: true
+  changed_when: false
+
+- name: Hold kube packages
+  ansible.builtin.command: apt-mark hold kubelet kubeadm kubectl
+  become: true
+  changed_when: false
+
+# - Insert aliases into ~/.bashrc and apply them
+- name: Add kubectl aliases to target user's ~/.bashrc
+  ansible.builtin.blockinfile:
+    path: "/home/{{ kubernetes_readiness_target_user }}/.bashrc"
+    create: true
+    marker: "# {mark} kubernetes_readiness aliases"
+    block: |
+      k='kubectl'
+      kgp='kubectl get pods'
+      kgn='kubectl get nodes'
+      kgns='kubectl get namespaces'
+      kgs='kubectl get services'
+      kgpv='kubectl get pv'
+      kgpvc='kubectl get pvc'
+  become: true
+  when: kubernetes_readiness_target_user != "root"
+
+- name: Apply aliases for target user shell sessions (source ~/.bashrc)
+  ansible.builtin.shell: |
+    bash -lc "source ~/.bashrc"
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: "{{ kubernetes_readiness_target_user }}"
+  changed_when: false
+  when: kubernetes_readiness_target_user != "root"
+
+- name: Also add kubectl aliases to root's ~/.bashrc
+  ansible.builtin.blockinfile:
+    path: "/root/.bashrc"
+    create: true
+    marker: "# {mark} kubernetes_readiness aliases"
+    block: |
+      k='kubectl'
+      kgp='kubectl get pods'
+      kgn='kubectl get nodes'
+      kgns='kubectl get namespaces'
+      kgs='kubectl get services'
+      kgpv='kubectl get pv'
+      kgpvc='kubectl get pvc'
+  become: true
+
+- name: Apply aliases for root shell sessions (source ~/.bashrc)
+  ansible.builtin.shell: |
+    bash -lc "source ~/.bashrc"
+  args:
+    executable: /bin/bash
+  become: true
+  become_user: root
+  changed_when: false
+

@@ -1,0 +1,24 @@
+---
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  become: true
+
+- name: Restart containerd
+  ansible.builtin.service:
+    name: containerd
+    state: restarted
+  become: true
+
+- name: Enable and start containerd
+  ansible.builtin.service:
+    name: containerd
+    enabled: true
+    state: started
+  become: true
+
+- name: Enable kubelet
+  ansible.builtin.service:
+    name: kubelet
+    enabled: true
+  become: true
+
