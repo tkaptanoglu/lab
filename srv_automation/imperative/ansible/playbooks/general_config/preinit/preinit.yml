@@ -13,5 +13,5 @@
     - role: roles/bootstrap/update_and_upgrade
     - role: roles/vault
     - role: roles/os/system/enable_cgroups
-    - role: roles/os/reboot/reboot
+    - role: roles/os/reboot
 
