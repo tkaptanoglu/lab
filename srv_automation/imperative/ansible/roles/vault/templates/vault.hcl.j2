@@ -1,15 +1,22 @@
-ui = {{ vault_config.ui }}
+ui = {{ vault_ui | lower }}
 
-storage "raft" {
-  path    = "{{ vault_config.storage.raft.path }}"
-  node_id = "{{ vault_config.storage.raft.node_id }}"
+disable_mlock = {{ vault_disable_mlock | lower }}
+
+api_addr     = "{{ vault_api_addr }}"
+cluster_addr = "{{ vault_cluster_addr }}"
+
+storage "file" {
+  path = "{{ vault_storage_path }}"
 }
 
 listener "tcp" {
-  address     = "{{ vault_config.listener.tcp.address }}"
-  tls_disable = {{ vault_config.listener.tcp.tls_disable }}
+  address     = "{{ vault_listener_address }}"
+  tls_disable = {{ vault_listener_tls_disable | lower }}
 }
 
-api_addr = "{{ vault_config.api_addr }}"
-cluster_addr = "{{ vault_config.api_addr }}"
+# You can add telemetry blocks here later if needed:
+# telemetry {
+#   prometheus_retention_time = "30s"
+#   disable_hostname = true
+# }
 

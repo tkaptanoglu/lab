@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: vault
+  description: Install HashiCorp Vault on Ubuntu ARM64 via official binary zip + systemd
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions: ["jammy"]
+dependencies: []
+

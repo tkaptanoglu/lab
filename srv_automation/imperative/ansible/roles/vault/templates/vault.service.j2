@@ -1,0 +1,29 @@
+[Unit]
+Description=HashiCorp Vault
+Documentation=https://developer.hashicorp.com/vault/docs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User={{ vault_user }}
+Group={{ vault_group }}
+
+ExecStart={{ vault_bin_path }} server -config={{ vault_config_dir }}
+ExecReload=/bin/kill --signal HUP $MAINPID
+KillMode=process
+KillSignal=SIGINT
+
+Restart=on-failure
+RestartSec=5
+
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths={{ vault_data_dir }} {{ vault_log_dir }} {{ vault_config_dir }}
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,22 +1,47 @@
 ---
-vault_version: ""
+# Vault version to install (override per environment)
+vault_version: "1.17.0"
+
+# HashiCorp release URL base
+vault_release_base_url: "https://releases.hashicorp.com/vault"
+
+# Install locations
+vault_bin_dir: "/usr/local/bin"
+vault_bin_path: "{{ vault_bin_dir }}/vault"
+
+# System user/group
 vault_user: "vault"
 vault_group: "vault"
-vault_config_path: "/etc/vault.d"
-vault_data_path: "/opt/vault"
-vault_bin_path: "/usr/bin/vault"
-vault_service_state: started
-vault_service_enabled: true
 
-vault_config:
-  ui: true
-  storage:
-    raft:
-      path: "{{ vault_data_path }}"
-      node_id: "vault-node-1"
-  listener:
-    tcp:
-      address: "0.0.0.0:8200"
-      tls_disable: "true"
-  api_addr: "http://{{ ansible_host }}:8200"
+# Directories
+vault_config_dir: "/etc/vault.d"
+vault_data_dir: "/opt/vault/data"
+vault_log_dir: "/var/log/vault"
+
+# Service
+vault_service_name: "vault"
+vault_systemd_unit_path: "/etc/systemd/system/{{ vault_service_name }}.service"
+
+# Vault runtime config (template variables)
+vault_api_addr: "http://127.0.0.1:8200"
+vault_cluster_addr: "http://127.0.0.1:8201"
+
+# Listener settings
+vault_listener_address: "127.0.0.1:8200"
+vault_listener_tls_disable: true
+
+# On many small systems and containers, mlock causes issues unless CAP_IPC_LOCK is granted
+vault_disable_mlock: true
+
+# Storage backend (file for single-node)
+vault_storage_path: "{{ vault_data_dir }}"
+
+# UI
+vault_ui: true
+
+# Whether to ensure the HashiCorp APT repo is NOT used on ARM64 hosts
+vault_remove_hashicorp_apt_repo: false
+
+# Whether to stop/remove any apt-installed Vault package if present
+vault_remove_apt_vault_if_present: true
 
