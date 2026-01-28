@@ -11,5 +11,5 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
   hostPath:
-    path: /mnt/external/navidrome-data
+    path: /var/lib/navidrome
     type: DirectoryOrCreate
