@@ -1,48 +1,76 @@
 ---
+# roles/os/system/enable_cgroups/tasks/main.yml
+# Purpose: Enable cgroups (cpuset and memory) on Raspberry Pi Ubuntu by editing /boot/firmware/cmdline.txt
+# IMPORTANT: This role MUST NOT reboot. It only edits cmdline.txt and (optionally) creates a FAT-safe backup.
+
 - name: Check cmdline.txt exists
   ansible.builtin.stat:
-    path: "{{ enable_cgroups_cmdline_path }}"
+    path: /boot/firmware/cmdline.txt
   register: cmdline_stat
 
 - name: Fail if cmdline.txt not found
   ansible.builtin.fail:
-    msg: "Kernel cmdline file not found at {{ enable_cgroups_cmdline_path }} (is this a Raspberry Pi / Ubuntu image using /boot/firmware?)"
+    msg: "/boot/firmware/cmdline.txt not found. Are you on Ubuntu for Raspberry Pi (boot/firmware layout)?"
   when: not cmdline_stat.stat.exists
 
 - name: Read current cmdline.txt
   ansible.builtin.slurp:
-    path: "{{ enable_cgroups_cmdline_path }}"
+    path: /boot/firmware/cmdline.txt
   register: cmdline_slurp
+
+- name: Set current cmdline string
+  ansible.builtin.set_fact:
+    cmdline_current: "{{ (cmdline_slurp.content | b64decode).strip() }}"
+
+- name: Define required cgroup kernel params
+  ansible.builtin.set_fact:
+    cgroup_required_params:
+      - "cgroup_enable=cpuset"
+      - "cgroup_enable=memory"
+      - "cgroup_memory=1"
+
+- name: Compute missing cgroup params
+  ansible.builtin.set_fact:
+    cgroup_missing_params: "{{ cgroup_required_params | reject('in', cmdline_current) | list }}"
 
 - name: Compute updated cmdline line (append missing cgroup options)
   ansible.builtin.set_fact:
-    cmdline_current: "{{ (cmdline_slurp.content | b64decode).strip() }}"
-    cmdline_updated: >-
-      {{
-        (cmdline_slurp.content | b64decode).strip()
-        ~
-        (
-          ' ' ~ (enable_cgroups_options
-                 | reject('in', (cmdline_slurp.content | b64decode).strip().split())
-                 | list
-                 | join(' ')
-                )
-          if (enable_cgroups_options
-              | reject('in', (cmdline_slurp.content | b64decode).strip().split())
-              | list
-              | length) > 0
-          else ''
-        )
-      }}
+    cmdline_updated: "{{ cmdline_current ~ (' ' ~ (cgroup_missing_params | join(' ')) if (cgroup_missing_params | length) > 0 else '') }}"
 
-- name: Update cmdline.txt with required cgroup options
+- name: Determine if cmdline needs change
+  ansible.builtin.set_fact:
+    cmdline_needs_change: "{{ cmdline_updated != cmdline_current }}"
+
+# IMPORTANT: /boot/firmware is often vfat. vfat does not allow ':' in filenames.
+# We create our own backup with a FAT-safe timestamp (colons removed).
+- name: Create FAT-safe backup of cmdline.txt (only if changing)
   ansible.builtin.copy:
-    dest: "{{ enable_cgroups_cmdline_path }}"
+    src: /boot/firmware/cmdline.txt
+    dest: "/boot/firmware/cmdline.txt.backup-{{ ansible_date_time.date }}-{{ ansible_date_time.time | regex_replace(':', '') }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: cmdline_needs_change
+
+- name: Update cmdline.txt with required cgroup options (NO reboot)
+  ansible.builtin.copy:
+    dest: /boot/firmware/cmdline.txt
     content: "{{ cmdline_updated }}\n"
-    owner: "{{ cmdline_stat.stat.pw_name | default('root') }}"
-    group: "{{ cmdline_stat.stat.gr_name | default('root') }}"
-    mode: "{{ '%04o' | format(cmdline_stat.stat.mode | int(base=8)) if cmdline_stat.stat.mode is defined else '0644' }}"
-    backup: true
-  when: cmdline_updated != cmdline_current
-  notify: Reboot for cgroups
+    owner: root
+    group: root
+    mode: "0644"
+  when: cmdline_needs_change
+
+- name: Inform that a reboot is required to apply cgroup kernel parameters (role does NOT reboot)
+  ansible.builtin.debug:
+    msg: >-
+      Updated /boot/firmware/cmdline.txt to enable cgroups: {{ cgroup_missing_params | join(', ') }}.
+      A reboot is required for changes to take effect. This role does NOT perform a reboot.
+  when: cmdline_needs_change
+
+- name: Report no change needed
+  ansible.builtin.debug:
+    msg: "cgroup options already present in /boot/firmware/cmdline.txt; no changes made."
+  when: not cmdline_needs_change
 
