@@ -1,0 +1,21 @@
+---
+- name: Install kube-prometheus-stack on prod cluster
+  hosts: "k8s_masters:&prod"
+  become: false
+  roles:
+    - role: observability/kube_prometheus_stack
+      vars:
+        kps_release_name: "kps-prod"
+        kps_grafana_nodeport: 32000
+        kps_prometheus_retention: "7d"
+
+- name: Install kube-prometheus-stack on test cluster
+  hosts: "k8s_masters:&test"
+  become: false
+  roles:
+    - role: observability/kube_prometheus_stack
+      vars:
+        kps_release_name: "kps-test"
+        kps_grafana_nodeport: 32001
+        kps_prometheus_retention: "2d"
+

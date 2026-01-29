@@ -1,0 +1,9 @@
+---
+- name: Install Helm on Ansible target host(s)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - k8s/helm
+

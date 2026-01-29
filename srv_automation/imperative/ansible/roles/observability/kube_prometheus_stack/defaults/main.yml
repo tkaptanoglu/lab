@@ -1,0 +1,14 @@
+---
+kps_release_name: "kube-prometheus-stack"
+kps_namespace: "monitoring"
+kps_chart_ref: "prometheus-community/kube-prometheus-stack"
+kps_chart_version: ""
+
+kps_kubeconfig_path: "/home/{{ ansible_user }}/.kube/config"
+
+kps_prometheus_retention: "7d"
+
+# Grafana exposure
+kps_grafana_service_type: "NodePort"
+kps_grafana_nodeport: 32000
+

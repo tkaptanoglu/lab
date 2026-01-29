@@ -1,0 +1,18 @@
+defaultRules:
+  create: true
+
+prometheus:
+  prometheusSpec:
+    retention: "{{ kps_prometheus_retention }}"
+    hostNetwork: false
+    dnsPolicy: ClusterFirst
+
+grafana:
+  adminPassword: "{{ kps_grafana_admin_password }}"
+
+  service:
+    type: "{{ kps_grafana_service_type }}"
+{% if kps_grafana_service_type == "NodePort" %}
+    nodePort: {{ kps_grafana_nodeport }}
+{% endif %}
+
