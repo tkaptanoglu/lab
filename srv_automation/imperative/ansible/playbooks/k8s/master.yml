@@ -1,0 +1,13 @@
+---
+- name: Kubernetes Master Node Workflow (control plane + schedulable + flannel + join export)
+  hosts: k8s_masters
+  gather_facts: true
+
+  roles:
+    - role: k8s/master/prerequisites
+    - role: k8s/master/control_plane_init
+    - role: k8s/master/kubectl_user_kubeconfig
+    - role: k8s/master/flannel_cni
+    - role: k8s/master/control_plane_untaint
+    - role: k8s/master/join_command_export
+
