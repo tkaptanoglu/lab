@@ -1,0 +1,27 @@
+---
+- name: Ensure curl is installed (required by Helm install script)
+  ansible.builtin.apt:
+    name: curl
+    state: present
+    update_cache: true
+  become: true
+
+- name: Download official Helm installer script (get-helm-4)
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4"
+    dest: "/tmp/get_helm.sh"
+    mode: "0700"
+  become: true
+
+- name: Run Helm installer script
+  ansible.builtin.command: "/tmp/get_helm.sh"
+  become: true
+  environment:
+    # Make it non-interactive
+    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+- name: Verify Helm installed
+  ansible.builtin.command: "helm version"
+  register: helm_version
+  changed_when: false
+
