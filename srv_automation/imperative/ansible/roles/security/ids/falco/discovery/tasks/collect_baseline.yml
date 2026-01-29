@@ -1,0 +1,148 @@
+---
+- name: Determine systemd service active state (if unit exists)
+  ansible.builtin.command: bash -lc "systemctl is-active falco"
+  register: _falco_is_active
+  changed_when: false
+  failed_when: false
+  when: falco_discovery.install.has_systemd_unit | default(false)
+
+- name: Determine systemd service enabled state (if unit exists)
+  ansible.builtin.command: bash -lc "systemctl is-enabled falco"
+  register: _falco_is_enabled
+  changed_when: false
+  failed_when: false
+  when: falco_discovery.install.has_systemd_unit | default(false)
+
+- name: Capture recent journal logs (if systemd unit exists)
+  ansible.builtin.command: bash -lc "journalctl -u falco -n {{ falco_discovery_journal_lines }} --no-pager"
+  register: _falco_journal
+  changed_when: false
+  failed_when: false
+  when: falco_discovery.install.has_systemd_unit | default(false)
+
+- name: Capture docker logs (if container detected)
+  ansible.builtin.shell: |
+    set -o pipefail
+    name="$(docker ps --format '{{"{{"}}.Names{{"}}"}}' | grep -i falco | head -n1 || true)"
+    if [ -n "$name" ]; then docker logs --tail {{ falco_discovery_journal_lines }} "$name" || true; fi
+  args:
+    executable: /bin/bash
+  register: _falco_docker_logs
+  changed_when: false
+  failed_when: false
+  when:
+    - falco_discovery.install_mode == "container"
+    - falco_discovery.install.docker_present | default(false)
+
+- name: Stat and checksum rules_files entries (sha256; files will have checksum, dirs will not)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+  loop: "{{ falco_discovery.paths.rules_files | default([]) }}"
+  register: _falco_rules_stats
+  changed_when: false
+  failed_when: false
+
+- name: Identify rules directories from rules_files
+  ansible.builtin.set_fact:
+    _falco_rules_dirs: >-
+      {{
+        (_falco_rules_stats.results | default([]))
+        | selectattr('stat.exists','equalto',true)
+        | selectattr('stat.isdir','equalto',true)
+        | map(attribute='stat.path')
+        | list
+      }}
+  changed_when: false
+
+- name: Find YAML rules under rules directories (best-effort)
+  ansible.builtin.find:
+    paths: "{{ _falco_rules_dirs }}"
+    patterns:
+      - "*.yaml"
+      - "*.yml"
+    file_type: file
+    recurse: true
+  register: _falco_rules_dir_files
+  changed_when: false
+  when: (_falco_rules_dirs | length) > 0
+
+- name: Stat and checksum rules found inside rules directories (sha256)
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    checksum_algorithm: sha256
+  loop: "{{ (_falco_rules_dir_files.files | default([])) }}"
+  register: _falco_rules_dir_stats
+  changed_when: false
+  failed_when: false
+  when: _falco_rules_dir_files is defined
+
+- name: Build hashes dict (files only; includes files inside rules directories)
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'rules': {
+            'hashes': _hashes
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+  vars:
+    _all_file_stats: >-
+      {{
+        (
+          (_falco_rules_stats.results | default([]))
+          + (_falco_rules_dir_stats.results | default([]))
+        )
+        | selectattr('stat.exists','equalto',true)
+        | selectattr('stat.isreg','equalto',true)
+        | list
+      }}
+    _hashes: >-
+      {{
+        dict(
+          (_all_file_stats | map(attribute='stat.path') | list)
+          | zip(
+              (_all_file_stats
+                | map(attribute='stat.checksum')
+                | map('regex_replace', '^(.*)$', 'sha256:\\1')
+                | list
+              )
+            )
+        )
+      }}
+
+- name: Derive health issues from logs (simple heuristics) and finalize baseline fields
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'service': {
+            'unit': 'falco',
+            'active': (_falco_is_active.stdout | default('unknown') | trim),
+            'enabled': (_falco_is_enabled.stdout | default('unknown') | trim)
+          },
+          'baseline': {
+            'version_raw': (falco_discovery.install.version_raw | default('') | trim),
+            'rules_files': (falco_discovery.paths.rules_files | default([])),
+            'rules_dirs': (_falco_rules_dirs | default([]))
+          },
+          'logs': {
+            'journal': (_falco_journal.stdout | default('')),
+            'docker': (_falco_docker_logs.stdout | default(''))
+          },
+          'health': {
+            'issues': (
+              (
+                (_falco_journal.stdout | default('') ~ "\n" ~ (_falco_docker_logs.stdout | default('')))
+                .splitlines()
+                | select('search', '(?i)(error|fail|failed|fatal|panic|invalid|parse)')
+                | list
+              )[:25]
+            )
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+

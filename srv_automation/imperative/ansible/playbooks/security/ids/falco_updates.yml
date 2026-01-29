@@ -1,0 +1,16 @@
+---
+- name: Falco rules pipeline (end-to-end)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: roles/security/ids/falco/discovery
+
+    # later stages:
+    # - role: security/ids/falco/rules_source
+    # - role: security/ids/falco/validate
+    # - role: security/ids/falco/deploy
+    # - role: security/ids/falco/reload
+    # - role: security/ids/falco/report
+

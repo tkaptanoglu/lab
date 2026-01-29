@@ -1,0 +1,111 @@
+---
+- name: Stat candidate config paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ falco_discovery_candidate_config_paths }}"
+  register: _falco_cfg_stats
+  changed_when: false
+
+- name: Choose config path (first existing)
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'paths': {
+            'config': (
+              (_falco_cfg_stats.results | selectattr('stat.exists','equalto',true) | map(attribute='stat.path') | list | first)
+              | default('')
+            )
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+
+- name: Slurp falco.yaml (if present)
+  ansible.builtin.slurp:
+    src: "{{ falco_discovery.paths.config }}"
+  register: _falco_cfg_slurp
+  when: falco_discovery.paths.config | length > 0
+
+- name: Parse falco.yaml into a dict (best-effort)
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'config': {
+            'parsed': (( _falco_cfg_slurp.content | b64decode ) | from_yaml),
+            'raw_path': falco_discovery.paths.config
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+  failed_when: false
+  when: falco_discovery.paths.config | length > 0
+
+- name: Extract rules_files from parsed config (if present)
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'paths': {
+            'rules_files': (
+              (falco_discovery.config.parsed.rules_files | default([]))
+              if (falco_discovery.config is defined and falco_discovery.config.parsed is mapping)
+              else
+              []
+            )
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+
+- name: Find rules files by glob fallback (if rules_files empty)
+  ansible.builtin.find:
+    paths: "{{ falco_discovery_candidate_rules_dirs }}"
+    patterns: "{{ falco_discovery_rules_glob }}"
+    file_type: file
+    recurse: false
+  register: _falco_rules_find
+  changed_when: false
+  when: (falco_discovery.paths.rules_files | default([])) | length == 0
+
+- name: Set rules_files from fallback find (sorted)
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'paths': {
+            'rules_files': (
+              (_falco_rules_find.files | map(attribute='path') | list | sort)
+              if (_falco_rules_find is defined)
+              else
+              (falco_discovery.paths.rules_files | default([]))
+            )
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+  when: (falco_discovery.paths.rules_files | default([])) | length == 0
+
+- name: Normalize rules_files to absolute paths only (drop empties)
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'paths': {
+            'rules_files': (falco_discovery.paths.rules_files | default([]) | select('match','^/') | list)
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+
+- name: Fail if no rules files could be determined (policy)
+  ansible.builtin.fail:
+    msg: >-
+      Could not determine Falco rules files on {{ inventory_hostname }}.
+      config={{ falco_discovery.paths.config | default('') }},
+      install_mode={{ falco_discovery.install_mode }}.
+  when:
+    - falco_discovery_fail_if_no_rules | bool
+    - (falco_discovery.paths.rules_files | default([])) | length == 0
+

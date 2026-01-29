@@ -1,0 +1,19 @@
+---
+- name: Initialize falco_discovery facts
+  ansible.builtin.set_fact:
+    falco_discovery: {}
+  changed_when: false
+
+- name: Detect Falco installation mode
+  ansible.builtin.import_tasks: detect_install.yml
+
+- name: Discover Falco config and rules paths
+  ansible.builtin.import_tasks: discover_paths.yml
+
+- name: Collect baseline (version, service state, hashes, logs)
+  ansible.builtin.import_tasks: collect_baseline.yml
+
+- name: Persist discovery artifact (controller)
+  ansible.builtin.import_tasks: persist_artifact.yml
+  when: falco_discovery_write_artifacts | bool
+

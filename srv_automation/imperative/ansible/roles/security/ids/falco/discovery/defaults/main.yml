@@ -1,0 +1,32 @@
+---
+# Where falco config/rules usually live
+falco_discovery_candidate_config_paths:
+  - /etc/falco/falco.yaml
+  - /usr/local/etc/falco/falco.yaml
+
+falco_discovery_candidate_rules_dirs:
+  - /etc/falco
+  - /usr/local/etc/falco
+
+# If falco.yaml has no rules_files, use this glob fallback
+falco_discovery_rules_glob: "falco_rules*.yaml"
+
+# How many log lines to capture
+falco_discovery_journal_lines: 80
+
+# Write a discovery artifact on the controller
+falco_discovery_write_artifacts: true
+
+# Directory on the controller (Ansible control node) for artifacts
+falco_discovery_artifacts_dir: "artifacts/falco_discovery"
+
+# If true, fail the whole play early when Falco can't be found
+falco_discovery_fail_if_missing: true
+
+# If true, fail when no rules files can be determined
+falco_discovery_fail_if_no_rules: true
+
+# systemd unit name candidates
+falco_discovery_systemd_units:
+  - falco
+

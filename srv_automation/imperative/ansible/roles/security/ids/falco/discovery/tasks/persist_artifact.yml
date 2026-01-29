@@ -1,0 +1,16 @@
+---
+- name: Ensure artifacts directory exists on controller
+  ansible.builtin.file:
+    path: "{{ falco_discovery_artifacts_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: Write per-host discovery JSON artifact
+  ansible.builtin.template:
+    src: falco_discovery.json.j2
+    dest: "{{ falco_discovery_artifacts_dir }}/{{ inventory_hostname }}.json"
+    mode: "0644"
+  delegate_to: localhost
+

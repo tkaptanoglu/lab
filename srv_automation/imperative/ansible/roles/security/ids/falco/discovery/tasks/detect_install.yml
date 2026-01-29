@@ -1,0 +1,108 @@
+---
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Check if falco binary exists
+  ansible.builtin.command: bash -lc "command -v falco"
+  register: _falco_bin
+  changed_when: false
+  failed_when: false
+
+- name: Check falco version (if binary exists)
+  ansible.builtin.command: bash -lc "falco --version"
+  register: _falco_version
+  changed_when: false
+  failed_when: false
+  when: _falco_bin.rc == 0
+
+- name: Check for systemd unit (falco)
+  ansible.builtin.command: bash -lc "systemctl cat falco"
+  register: _falco_unit_cat
+  changed_when: false
+  failed_when: false
+
+- name: Check docker presence
+  ansible.builtin.command: bash -lc "command -v docker"
+  register: _docker_bin
+  changed_when: false
+  failed_when: false
+
+- name: Check crictl presence
+  ansible.builtin.command: bash -lc "command -v crictl"
+  register: _crictl_bin
+  changed_when: false
+  failed_when: false
+
+- name: Detect Falco container via docker (best-effort)
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker ps --format '{{"{{"}}.Names{{"}}"}} {{"{{"}}.Image{{"}}"}}' | grep -i falco || true
+  args:
+    executable: /bin/bash
+  register: _docker_falco_ps
+  changed_when: false
+  failed_when: false
+  when: _docker_bin.rc == 0
+
+- name: Detect Falco container via crictl (best-effort)
+  ansible.builtin.shell: |
+    set -o pipefail
+    crictl ps | grep -i falco || true
+  args:
+    executable: /bin/bash
+  register: _crictl_falco_ps
+  changed_when: false
+  failed_when: false
+  when: _crictl_bin.rc == 0
+
+- name: Determine install mode
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'install': {
+            'has_falco_binary': (_falco_bin.rc == 0),
+            'falco_path': (_falco_bin.stdout | default('') | trim),
+            'version_raw': (_falco_version.stdout | default('') | trim),
+            'has_systemd_unit': (_falco_unit_cat.rc == 0),
+            'apt_installed': (('falco' in ansible_facts.packages) or ('falcoctl' in ansible_facts.packages)),
+            'docker_present': (_docker_bin.rc == 0),
+            'crictl_present': (_crictl_bin.rc == 0),
+            'docker_falco_ps': (_docker_falco_ps.stdout | default('') | trim),
+            'crictl_falco_ps': (_crictl_falco_ps.stdout | default('') | trim)
+          }
+        }, recursive=True)
+      }}
+  changed_when: false
+
+- name: Compute install_mode classification
+  ansible.builtin.set_fact:
+    falco_discovery: >-
+      {{
+        falco_discovery | combine({
+          'install_mode':
+            (
+              'container' if ((falco_discovery.install.docker_falco_ps | length) > 0 or (falco_discovery.install.crictl_falco_ps | length) > 0)
+              else
+              'apt_systemd' if (falco_discovery.install.has_systemd_unit and falco_discovery.install.apt_installed)
+              else
+              'binary_systemd' if (falco_discovery.install.has_systemd_unit and falco_discovery.install.has_falco_binary)
+              else
+              'binary' if (falco_discovery.install.has_falco_binary)
+              else
+              'unknown'
+            )
+        }, recursive=True)
+      }}
+  changed_when: false
+
+- name: Fail if Falco is missing (policy)
+  ansible.builtin.fail:
+    msg: >-
+      Falco could not be detected on host {{ inventory_hostname }}.
+      install_mode=unknown, no binary, no container, no systemd unit.
+  when:
+    - falco_discovery_fail_if_missing | bool
+    - falco_discovery.install_mode == "unknown"
+
