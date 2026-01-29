@@ -1,0 +1,57 @@
+---
+- name: Ensure join command output directory exists
+  ansible.builtin.file:
+    path: "{{ k8s_join_out_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+- name: Check whether join command file already exists
+  ansible.builtin.stat:
+    path: "{{ k8s_join_out_file }}"
+  register: join_file
+
+- name: Decide whether we must (re)generate join command
+  ansible.builtin.set_fact:
+    must_generate_join: "{{ rotate_join_token or (not join_file.stat.exists) }}"
+
+- name: Generate kubeadm join command (force admin kubeconfig; avoids residue from bad defaults)
+  ansible.builtin.command:
+    cmd: "sudo KUBECONFIG=/etc/kubernetes/admin.conf kubeadm token create --print-join-command"
+  register: join_cmd
+  when: must_generate_join
+  changed_when: true
+
+- name: Write join command script to disk (canonical content/permissions)
+  ansible.builtin.copy:
+    dest: "{{ k8s_join_out_file }}"
+    content: |
+      #!/bin/bash
+      {{ join_cmd.stdout }}
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when: must_generate_join
+
+- name: Install systemd unit for HTTP export (optional)
+  ansible.builtin.template:
+    src: "srv-automation-join-export.service.j2"
+    dest: "{{ k8s_join_service_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: export_join_command_http
+
+- name: Enable and start HTTP export service (optional)
+  ansible.builtin.systemd:
+    name: "srv-automation-join-export.service"
+    daemon_reload: true
+    enabled: true
+    state: started
+  become: true
+  when: export_join_command_http
+

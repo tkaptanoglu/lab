@@ -1,0 +1,9 @@
+---
+flannel_manifest_url: "https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml"
+
+# Readiness waits
+flannel_namespace: "kube-flannel"
+flannel_daemonset_name: "kube-flannel-ds"
+flannel_wait_retries: 60
+flannel_wait_delay: 5
+

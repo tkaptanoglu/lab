@@ -1,0 +1,70 @@
+---
+- name: Ensure admin.conf exists
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: admin_conf
+
+- name: Fail if control plane not initialized
+  ansible.builtin.assert:
+    that: admin_conf.stat.exists
+    fail_msg: "/etc/kubernetes/admin.conf missing; kubeadm init not done."
+
+# Determine the *intended interactive user* without hardcoding:
+# - If play is running under sudo, SUDO_USER is the original login user.
+# - Otherwise fall back to the SSH user.
+- name: Determine target kubectl user
+  ansible.builtin.set_fact:
+    kubectl_user: "{{ ansible_env.SUDO_USER | default(ansible_user, true) }}"
+
+- name: Fail if kubectl user could not be determined
+  ansible.builtin.assert:
+    that:
+      - kubectl_user is defined
+      - kubectl_user | length > 0
+      - kubectl_user != "root"
+    fail_msg: "Could not determine non-root kubectl user (got '{{ kubectl_user | default('') }}')."
+
+- name: Resolve home directory for kubectl user via getent
+  ansible.builtin.command:
+    cmd: "getent passwd {{ kubectl_user }}"
+  register: getent_out
+  changed_when: false
+
+- name: Compute kube paths
+  ansible.builtin.set_fact:
+    kubectl_home: "{{ getent_out.stdout.split(':')[5] }}"
+    kubectl_kube_dir: "{{ getent_out.stdout.split(':')[5] }}/.kube"
+    kubectl_kubeconfig: "{{ getent_out.stdout.split(':')[5] }}/.kube/config"
+
+- name: Ensure ~/.kube exists for kubectl user
+  ansible.builtin.file:
+    path: "{{ kubectl_kube_dir }}"
+    state: directory
+    owner: "{{ kubectl_user }}"
+    group: "{{ kubectl_user }}"
+    mode: "0700"
+  become: true
+
+- name: Install kubeconfig for kubectl user (copy admin.conf)
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ kubectl_kubeconfig }}"
+    remote_src: true
+    owner: "{{ kubectl_user }}"
+    group: "{{ kubectl_user }}"
+    mode: "0600"
+  become: true
+
+# Prove it exists after automation (no manual steps)
+- name: Assert kubeconfig file now exists
+  ansible.builtin.stat:
+    path: "{{ kubectl_kubeconfig }}"
+  register: user_kcfg
+
+- name: Fail if kubeconfig was not created
+  ansible.builtin.assert:
+    that:
+      - user_kcfg.stat.exists
+      - (user_kcfg.stat.size | int) > 0
+    fail_msg: "Kubeconfig was not created at {{ kubectl_kubeconfig }}."
+

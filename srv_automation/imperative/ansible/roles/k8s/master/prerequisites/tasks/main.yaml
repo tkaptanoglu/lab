@@ -1,0 +1,38 @@
+---
+# ---- Controller prerequisites (delegate to localhost) ----
+- name: Ensure kubernetes.core collection is installed on the controller
+  ansible.builtin.command:
+    cmd: >
+      ansible-galaxy collection install
+      {{ prereq_kubernetes_core_collection }}{{ (prereq_kubernetes_core_collection_version | length > 0) | ternary(':' ~ prereq_kubernetes_core_collection_version, '') }}
+      {{ prereq_collection_install_force | ternary('--force', '') }}
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+  when: prereq_install_kubernetes_core_collection
+
+# ---- Target prerequisites (run on each node) ----
+- name: Install target apt prerequisites for Kubernetes python client
+  ansible.builtin.apt:
+    name: "{{ prereq_target_apt_packages }}"
+    state: present
+    update_cache: true
+  become: true
+  when: prereq_install_target_python_deps and (prereq_target_apt_packages | length > 0)
+
+- name: Install target pip prerequisites for kubernetes.core modules
+  ansible.builtin.pip:
+    name: "{{ prereq_target_pip_packages }}"
+    state: present
+    executable: pip3
+  become: true
+  when: prereq_install_target_python_deps and (prereq_target_pip_packages | length > 0)
+
+# Quick sanity checks
+- name: Verify python kubernetes client import works on target
+  ansible.builtin.command:
+    cmd: "python3 -c 'import kubernetes, yaml; print(\"ok\")'"
+  register: prereq_py_check
+  changed_when: false
+  when: prereq_install_target_python_deps
+

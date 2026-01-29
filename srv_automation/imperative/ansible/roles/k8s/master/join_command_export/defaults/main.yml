@@ -1,0 +1,13 @@
+---
+k8s_join_out_dir: "/var/lib/srv_automation/k8s"
+k8s_join_out_file: "{{ k8s_join_out_dir }}/join-command.sh"
+
+# Improvement (1): rotate token on demand
+rotate_join_token: false
+
+# Same opt-in as your script (now via variable)
+export_join_command_http: false
+
+k8s_join_http_port: 8022
+k8s_join_service_path: "/etc/systemd/system/srv-automation-join-export.service"
+

@@ -1,0 +1,60 @@
+---
+- name: Assert admin kubeconfig exists
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: admin_conf
+
+- name: Fail if control plane is not initialized
+  ansible.builtin.assert:
+    that: admin_conf.stat.exists
+    fail_msg: "/etc/kubernetes/admin.conf does not exist — control plane is not initialized."
+
+# Resolve the SSH user's home directory without relying on Ansible HOME facts
+- name: Resolve home directory for SSH user (ansible_user)
+  ansible.builtin.command:
+    cmd: "getent passwd {{ ansible_user }}"
+  register: getent_out
+  changed_when: false
+
+- name: Set kube paths for SSH user
+  ansible.builtin.set_fact:
+    user_home: "{{ getent_out.stdout.split(':')[5] }}"
+    kube_dir: "{{ getent_out.stdout.split(':')[5] }}/.kube"
+    kubeconfig_path: "{{ getent_out.stdout.split(':')[5] }}/.kube/config"
+
+- name: Ensure ~/.kube exists for SSH user
+  ansible.builtin.file:
+    path: "{{ kube_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+  become: true
+
+- name: Install kubeconfig for SSH user (copy admin.conf)
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ kubeconfig_path }}"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  become: true
+
+- name: Verify kubectl works for SSH user using default kubeconfig resolution
+  ansible.builtin.command:
+    cmd: "kubectl get --raw=/healthz"
+  become: true
+  become_user: "{{ ansible_user }}"
+  register: kubectl_health
+  changed_when: false
+
+- name: Assert kubectl works for SSH user
+  ansible.builtin.assert:
+    that:
+      - kubectl_health.rc == 0
+      - kubectl_health.stdout is search("ok")
+    fail_msg: >
+      kubectl is not working for user {{ ansible_user }}.
+      stdout={{ kubectl_health.stdout }} stderr={{ kubectl_health.stderr }}
+

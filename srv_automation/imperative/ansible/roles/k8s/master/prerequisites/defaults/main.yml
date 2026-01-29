@@ -1,0 +1,23 @@
+---
+# Controller-side (where ansible-playbook runs)
+prereq_install_kubernetes_core_collection: true
+prereq_kubernetes_core_collection: "kubernetes.core"
+prereq_kubernetes_core_collection_version: ""   # e.g. "2.4.0" or leave empty for latest
+prereq_collection_install_force: false
+
+# Target-side (on the Kubernetes node)
+prereq_install_target_python_deps: true
+prereq_target_apt_packages:
+  - python3-pip
+  - python3-setuptools
+  - python3-wheel
+
+# Pip packages used by kubernetes.core modules when running on the target
+prereq_target_pip_packages:
+  - kubernetes
+  - pyyaml
+
+# If you prefer distro packages instead of pip on Ubuntu, you can switch to:
+# prereq_target_apt_packages: [python3-kubernetes, python3-yaml] (availability varies by Ubuntu version)
+# and set prereq_target_pip_packages: []
+

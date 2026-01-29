@@ -1,0 +1,32 @@
+---
+- name: Check whether control plane is already initialized
+  ansible.builtin.stat:
+    path: "{{ k8s_admin_conf_path }}"
+  register: admin_conf
+
+- name: Initialize Kubernetes control plane (kubeadm init)
+  ansible.builtin.command:
+    cmd: "kubeadm init --pod-network-cidr={{ k8s_pod_network_cidr }}"
+  become: true
+  when: not admin_conf.stat.exists
+  register: kubeadm_init
+  changed_when: kubeadm_init.rc == 0
+
+- name: Wait for API server port to become reachable
+  ansible.builtin.wait_for:
+    host: "{{ k8s_apiserver_host }}"
+    port: "{{ k8s_apiserver_port }}"
+    timeout: "{{ k8s_apiserver_wait_timeout }}"
+  when: not admin_conf.stat.exists
+
+- name: Re-check admin.conf after init (ensures it exists)
+  ansible.builtin.stat:
+    path: "{{ k8s_admin_conf_path }}"
+  register: admin_conf_after
+
+- name: Assert admin.conf exists
+  ansible.builtin.assert:
+    that:
+      - admin_conf_after.stat.exists
+    fail_msg: "Control plane init did not produce {{ k8s_admin_conf_path }}."
+

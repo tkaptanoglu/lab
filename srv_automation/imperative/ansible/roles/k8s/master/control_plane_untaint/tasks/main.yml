@@ -1,0 +1,32 @@
+---
+# NOTE:
+# Some Ansible environments resolve `command:` to ansible.legacy.command and reject task-level `become:`.
+# To stay compatible, we call kubectl using sudo explicitly.
+
+- name: Verify kubectl can reach the cluster (via admin.conf)
+  ansible.builtin.command:
+    cmd: "sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o name"
+  register: kubectl_nodes
+  changed_when: false
+
+- name: Assert kubectl connectivity
+  ansible.builtin.assert:
+    that:
+      - kubectl_nodes.rc == 0
+      - (kubectl_nodes.stdout | length) > 0
+    fail_msg: "kubectl cannot reach the cluster or returned no nodes."
+
+- name: Un-taint control-plane node to allow scheduling (control-plane key)
+  ansible.builtin.command:
+    cmd: "sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf taint nodes {{ ansible_hostname }} node-role.kubernetes.io/control-plane-"
+  register: untaint_cp
+  failed_when: false
+  changed_when: untaint_cp.rc == 0
+
+- name: Un-taint control-plane node to allow scheduling (master key)
+  ansible.builtin.command:
+    cmd: "sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf taint nodes {{ ansible_hostname }} node-role.kubernetes.io/master-"
+  register: untaint_master
+  failed_when: false
+  changed_when: untaint_master.rc == 0
+

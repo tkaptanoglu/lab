@@ -1,0 +1,9 @@
+---
+k8s_pod_network_cidr: "10.244.0.0/16"   # Flannel-compatible
+k8s_admin_conf_path: "/etc/kubernetes/admin.conf"
+
+# Readiness
+k8s_apiserver_host: "127.0.0.1"
+k8s_apiserver_port: 6443
+k8s_apiserver_wait_timeout: 300
+
