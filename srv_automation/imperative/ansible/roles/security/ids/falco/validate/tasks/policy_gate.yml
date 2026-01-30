@@ -1,0 +1,29 @@
+# roles/security/ids/falco/validate/tasks/policy_gate.yml
+# Fail if any artifact channel is not in falco_validate_allowed_channels.
+
+- name: "validate | Compute channels safely"
+  ansible.builtin.set_fact:
+    _artifact_channels: "{{ _artifact_channels_safe }}"
+  vars:
+    _artifact_channels_safe: >-
+      {%- set out = [] -%}
+      {%- for a in _artifacts -%}
+      {%- set subdir = (a.install_subdir | default(a.name | default('unknown'))) -%}
+      {%- set ch = (falco_validate_channel_map[subdir] if (falco_validate_channel_map is defined and subdir in falco_validate_channel_map) else subdir) -%}
+      {%- set _ = out.append(ch) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: "validate | Fail if any artifact channel is not allowed"
+  ansible.builtin.fail:
+    msg: >-
+      Falco rules validation blocked by policy.
+      Found channels={{ _artifact_channels | unique | sort }},
+      allowed={{ falco_validate_allowed_channels | sort }}.
+      Adjust falco_validate_allowed_channels or your rules_source artifacts/install_subdir.
+  when: >
+    (
+      _artifact_channels
+      | difference(falco_validate_allowed_channels)
+      | length
+    ) > 0

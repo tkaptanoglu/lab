@@ -1,0 +1,142 @@
+# roles/security/ids/falco/validate/tasks/main.yml
+
+- name: "validate | Assert falco binary is present"
+  ansible.builtin.stat:
+    path: "{{ falco_validate_falco_bin }}"
+  register: _falco_stat
+
+- name: "validate | Fail if falco is missing"
+  ansible.builtin.fail:
+    msg: "falco not found at {{ falco_validate_falco_bin }}. Install Falco in a prior role."
+  when: not _falco_stat.stat.exists
+
+# Determine staging dir:
+# 1) Use fact set by rules_source role
+# 2) Fall back to lockfile written by rules_source
+- name: "validate | Use staging dir from rules_source if available"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ falco_rules_source_staging_dir }}"
+  when: falco_rules_source_staging_dir is defined and (falco_rules_source_staging_dir | length > 0)
+
+- name: "validate | Read last fetch lockfile when staging dir fact is not set"
+  ansible.builtin.slurp:
+    src: "{{ falco_validate_staging_root }}/.last_fetch.yml"
+  register: _last_fetch
+  when: _staging_dir is not defined
+
+- name: "validate | Parse lockfile YAML"
+  ansible.builtin.set_fact:
+    _last_fetch_parsed: "{{ (_last_fetch.content | b64decode) | from_yaml }}"
+  when: _staging_dir is not defined
+
+- name: "validate | Set staging dir from lockfile"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ _last_fetch_parsed.staging_dir }}"
+  when: _staging_dir is not defined
+
+- name: "validate | Assert staging dir exists"
+  ansible.builtin.stat:
+    path: "{{ _staging_dir }}"
+  register: _staging_stat
+
+- name: "validate | Fail if staging dir is missing"
+  ansible.builtin.fail:
+    msg: "Staging directory {{ _staging_dir }} does not exist. Run rules_source first."
+  when: not _staging_stat.stat.exists
+
+- name: "validate | Read staging manifest (if present)"
+  ansible.builtin.stat:
+    path: "{{ _staging_dir }}/manifest.yml"
+  register: _manifest_stat
+
+- name: "validate | Load staging manifest.yml"
+  ansible.builtin.slurp:
+    src: "{{ _staging_dir }}/manifest.yml"
+  register: _manifest
+  when: _manifest_stat.stat.exists
+
+- name: "validate | Parse manifest YAML"
+  ansible.builtin.set_fact:
+    _manifest_parsed: "{{ (_manifest.content | b64decode) | from_yaml }}"
+  when: _manifest_stat.stat.exists
+
+- name: "validate | Build artifact list from manifest (or empty)"
+  ansible.builtin.set_fact:
+    _artifacts: "{{ _manifest_parsed.artifacts | default([]) }}"
+  when: _manifest_stat.stat.exists
+
+# Policy gate: allow/deny channels (stable/incubating/sandbox), based on manifest artifacts install_subdir
+- name: "validate | Policy gate artifacts by channel"
+  ansible.builtin.include_tasks: policy_gate.yml
+  when:
+    - _manifest_stat.stat.exists
+    - falco_validate_allowed_channels is defined
+    - (falco_validate_allowed_channels | length) > 0
+
+# STRICT discovery: only find files that match Falco rule naming conventions
+- name: "validate | Find Falco rule YAML files under staging (strict patterns)"
+  ansible.builtin.find:
+    paths: "{{ _staging_dir }}"
+    patterns: "{{ falco_validate_rule_file_globs }}"
+    recurse: true
+    file_type: file
+  register: _found_rules
+
+- name: "validate | Build rule file list"
+  ansible.builtin.set_fact:
+    _rule_files: "{{ _found_rules.files | map(attribute='path') | list }}"
+
+- name: "validate | Fail if no rule files were found"
+  ansible.builtin.fail:
+    msg: >-
+      No Falco rule YAML files found under staging dir {{ _staging_dir }} using patterns
+      {{ falco_validate_rule_file_globs }}.
+      Check what falcoctl installed (expected something like falco_rules.yaml).
+  when: (_rule_files | length) == 0
+
+# Build argv for falco validation:
+# argv := [falco] + [--validate=<file> for each file]
+- name: "validate | Build falco validate argv"
+  ansible.builtin.set_fact:
+    _falco_validate_argv: "{{ [falco_validate_falco_bin] + _validate_args }}"
+  vars:
+    _validate_args: >-
+      {%- set out = [] -%}
+      {%- for f in _rule_files -%}
+      {%- set _ = out.append('--validate=' ~ f) -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: "validate | Run falco rule validation"
+  ansible.builtin.command:
+    argv: "{{ _falco_validate_argv }}"
+  register: _validate_cmd
+  changed_when: false
+  failed_when: _validate_cmd.rc != 0
+
+- name: "validate | Write validation report"
+  ansible.builtin.copy:
+    dest: "{{ _staging_dir }}/{{ falco_validate_report_filename }}"
+    mode: "0644"
+    content: |
+      staging_dir: "{{ _staging_dir }}"
+      validated_at_utc: "{{ ansible_date_time.iso8601 }}"
+      falco_bin: "{{ falco_validate_falco_bin }}"
+      manifest_present: {{ _manifest_stat.stat.exists | default(false) | bool }}
+      artifacts: {{ (_artifacts | default([])) | to_nice_yaml(indent=2) | indent(2) }}
+      rule_files_count: {{ _rule_files | length }}
+      rule_files:
+      {% for f in _rule_files %}
+        - "{{ f }}"
+      {% endfor %}
+      validation:
+        rc: {{ _validate_cmd.rc }}
+        stdout: |
+          {{ _validate_cmd.stdout | default('') | indent(10) }}
+        stderr: |
+          {{ _validate_cmd.stderr | default('') | indent(10) }}
+
+- name: "validate | Expose facts for downstream roles"
+  ansible.builtin.set_fact:
+    falco_validate_staging_dir: "{{ _staging_dir }}"
+    falco_validate_rule_files: "{{ _rule_files }}"

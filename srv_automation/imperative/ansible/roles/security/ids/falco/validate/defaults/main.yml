@@ -1,0 +1,34 @@
+# roles/security/ids/falco/validate/defaults/main.yml
+
+# falco binary location
+falco_validate_falco_bin: /usr/bin/falco
+
+# Where rules_source stored staging (used only if we need to read .last_fetch.yml)
+falco_validate_staging_root: /var/lib/falco/rules-staging
+
+# Policy gate: allow these channels.
+# If empty => allow all.
+falco_validate_allowed_channels:
+  - stable
+
+# Map artifact install_subdir -> channel name.
+# If install_subdir isn't mapped, we use install_subdir as the channel.
+falco_validate_channel_map:
+  stable: stable
+  incubating: incubating
+  sandbox: sandbox
+  falco-rules: stable
+  falco-incubating-rules: incubating
+  falco-sandbox-rules: sandbox
+
+# STRICT rule file discovery:
+# Only validate files that match these globs.
+# This prevents validating manifest.yml or other metadata.
+falco_validate_rule_file_globs:
+  - "falco_rules*.yml"
+  - "falco_rules*.yaml"
+  - "*.rules.yml"
+  - "*.rules.yaml"
+
+# Output report (written into staging dir)
+falco_validate_report_filename: "validate-report.yml"
