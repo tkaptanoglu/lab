@@ -10,7 +10,7 @@
     ansible_python_interpreter: /usr/bin/python3
 
   roles:
-    - role: roles/security/ids/falco
+    - role: roles/security/ids/falco/installation
       vars:
         falco_reinstall_if_present: true
         falco_purge_on_remove: true
