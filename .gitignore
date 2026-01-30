@@ -1,2 +1,3 @@
 srv_automation/imperative/ansible/ansible.cfg
 srv_automation/imperative/ansible/inventory/
+srv_automation/imperative/ansible/playbooks/security/ids/artifacts/
