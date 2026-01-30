@@ -110,7 +110,16 @@
       - curl
       - gpg
     state: present
-    lock_timeout: "{{ falco_apt_lock_timeout | default(600) }}"
+
+- name: Install prerequisites for compiling Falco legacy eBPF probe (fallback)
+  apt:
+    name:
+      - clang
+      - llvm
+      - build-essential
+      - linux-headers-{{ ansible_kernel }}
+    state: present
+    update_cache: true
 
 - name: Download Falco GPG key (ASCII armor)
   ansible.builtin.get_url:
