@@ -1,0 +1,24 @@
+# roles/security/ids/falco/reload/defaults/main.yml
+
+# systemd service name for Falco
+falco_reload_service_name: falco
+
+# If true, only reload/restart when a version change is detected.
+# Detection uses falco_deploy_version_id fact if available, else reads the current symlink target.
+falco_reload_only_on_change: true
+
+# Where reload role stores last applied version marker
+falco_reload_state_dir: /var/lib/falco
+falco_reload_state_file: /var/lib/falco/.falco_rules_version
+
+# The symlink your deploy role manages (source of truth when fact isn't present)
+falco_reload_current_symlink: /var/lib/falco/rules-current
+
+# Strategy: try reload then restart on failure
+falco_reload_try_reload_first: true
+
+# If reload fails, restart Falco instead
+falco_reload_fallback_to_restart: true
+
+# If true, ensure service is enabled and started (even if no reload happens)
+falco_reload_ensure_running: true

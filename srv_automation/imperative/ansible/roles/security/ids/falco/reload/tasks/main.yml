@@ -1,0 +1,126 @@
+# roles/security/ids/falco/reload/tasks/main.yml
+
+- name: "reload | Gather service facts"
+  ansible.builtin.service_facts:
+
+- name: "reload | Fail if Falco systemd service is not known"
+  ansible.builtin.fail:
+    msg: >-
+      systemd service '{{ falco_reload_service_name }}' not found on this host.
+      Known services include: {{ (ansible_facts.services.keys() | list)[:20] }}...
+  when: (ansible_facts.services[falco_reload_service_name ~ '.service'] is not defined)
+
+# Determine desired "version marker"
+# 1) Prefer falco_deploy_version_id (from deploy role)
+# 2) Else use the current symlink target basename
+- name: "reload | Use deploy version id if available"
+  ansible.builtin.set_fact:
+    _desired_version: "{{ falco_deploy_version_id }}"
+  when: falco_deploy_version_id is defined and (falco_deploy_version_id | length > 0)
+
+- name: "reload | Stat current symlink when deploy version id not available"
+  ansible.builtin.stat:
+    path: "{{ falco_reload_current_symlink }}"
+  register: _current_link
+  when: _desired_version is not defined
+
+- name: "reload | Derive desired version from current symlink target"
+  ansible.builtin.set_fact:
+    _desired_version: "{{ (_current_link.stat.lnk_source | default('') | basename) }}"
+  when:
+    - _desired_version is not defined
+    - (_current_link.stat.islnk | default(false))
+
+- name: "reload | Ensure state directory exists"
+  ansible.builtin.file:
+    path: "{{ falco_reload_state_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: "reload | Read last applied version (if present)"
+  ansible.builtin.slurp:
+    src: "{{ falco_reload_state_file }}"
+  register: _last_applied_raw
+  changed_when: false
+  failed_when: false
+
+- name: "reload | Parse last applied version"
+  ansible.builtin.set_fact:
+    _last_applied_version: "{{ (_last_applied_raw.content | default('') | b64decode | trim) }}"
+  when: _last_applied_raw is defined and (_last_applied_raw.content | default('') | length) > 0
+
+- name: "reload | Decide whether reload is needed"
+  ansible.builtin.set_fact:
+    _needs_reload: >-
+      {{
+        (not (falco_reload_only_on_change | bool)) or
+        (_desired_version is not defined) or
+        ((_last_applied_version | default('')) != (_desired_version | default('')))
+      }}
+
+- name: "reload | Ensure Falco service is enabled and started (optional)"
+  ansible.builtin.systemd:
+    name: "{{ falco_reload_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: falco_reload_ensure_running | bool
+
+# If reload isn't needed, stop here (but keep facts)
+- name: "reload | Skip reload because version has not changed"
+  ansible.builtin.debug:
+    msg: "No reload needed (desired={{ _desired_version | default('unknown') }}, last={{ _last_applied_version | default('none') }})."
+  when: not _needs_reload
+
+# Try reload first
+- name: "reload | Attempt Falco reload (systemd reload)"
+  ansible.builtin.systemd:
+    name: "{{ falco_reload_service_name }}"
+    state: reloaded
+  register: _reload_attempt
+  failed_when: false
+  when:
+    - _needs_reload
+    - falco_reload_try_reload_first | bool
+
+# If reload unsupported/failed, restart
+- name: "reload | Restart Falco when reload failed or was not attempted"
+  ansible.builtin.systemd:
+    name: "{{ falco_reload_service_name }}"
+    state: restarted
+  register: _restart_attempt
+  when:
+    - _needs_reload
+    - falco_reload_fallback_to_restart | bool
+    - (not (falco_reload_try_reload_first | bool)) or (_reload_attempt is not defined) or ((_reload_attempt.failed | default(false)) | bool)
+
+# If we tried reload and it failed and restart is disabled, fail loudly
+- name: "reload | Fail if reload failed and restart fallback is disabled"
+  ansible.builtin.fail:
+    msg: >-
+      Falco reload failed and restart fallback is disabled.
+      reload result: {{ _reload_attempt | default({}) }}
+  when:
+    - _needs_reload
+    - falco_reload_try_reload_first | bool
+    - (falco_reload_fallback_to_restart | bool) == false
+    - (_reload_attempt.failed | default(false)) | bool
+
+# Record new applied version marker (only if we had one)
+- name: "reload | Write last applied version marker"
+  ansible.builtin.copy:
+    dest: "{{ falco_reload_state_file }}"
+    mode: "0644"
+    content: "{{ _desired_version | default('') }}\n"
+  when:
+    - _needs_reload
+    - _desired_version is defined
+    - (_desired_version | length) > 0
+
+# Expose facts for reporting
+- name: "reload | Expose reload facts"
+  ansible.builtin.set_fact:
+    falco_reload_desired_version: "{{ _desired_version | default('') }}"
+    falco_reload_last_applied_version: "{{ _last_applied_version | default('') }}"
+    falco_reload_performed: "{{ _needs_reload | bool }}"
+    falco_reload_used_restart: "{{ (_restart_attempt is defined) | bool }}"
