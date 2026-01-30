@@ -1,0 +1,268 @@
+# roles/security/ids/falco/deploy/tasks/main.yml
+
+# Determine staging dir:
+# 1) Use fact set by validate role
+# 2) Else use fact set by rules_source role
+# 3) Else fall back to lockfile written by rules_source
+- name: "deploy | Use staging dir from validate role if available"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ falco_validate_staging_dir }}"
+  when: falco_validate_staging_dir is defined and (falco_validate_staging_dir | length > 0)
+
+- name: "deploy | Use staging dir from rules_source role if validate fact not set"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ falco_rules_source_staging_dir }}"
+  when:
+    - _staging_dir is not defined
+    - falco_rules_source_staging_dir is defined
+    - (falco_rules_source_staging_dir | length > 0)
+
+- name: "deploy | Read last fetch lockfile when staging dir fact is not set"
+  ansible.builtin.slurp:
+    src: "{{ falco_deploy_staging_root }}/.last_fetch.yml"
+  register: _last_fetch
+  when: _staging_dir is not defined
+
+- name: "deploy | Parse lockfile YAML"
+  ansible.builtin.set_fact:
+    _last_fetch_parsed: "{{ (_last_fetch.content | b64decode) | from_yaml }}"
+  when: _staging_dir is not defined
+
+- name: "deploy | Set staging dir from lockfile"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ _last_fetch_parsed.staging_dir }}"
+  when: _staging_dir is not defined
+
+- name: "deploy | Assert staging dir exists"
+  ansible.builtin.stat:
+    path: "{{ _staging_dir }}"
+  register: _staging_stat
+
+- name: "deploy | Fail if staging dir is missing"
+  ansible.builtin.fail:
+    msg: "Staging directory {{ _staging_dir }} does not exist. Run rules_source first."
+  when: not _staging_stat.stat.exists
+
+# Optional gate: require validate-report.yml with rc: 0
+- name: "deploy | Check for validate report"
+  ansible.builtin.stat:
+    path: "{{ _staging_dir }}/{{ falco_deploy_validate_report_filename }}"
+  register: _valrep_stat
+  when: falco_deploy_require_validate_report | bool
+
+- name: "deploy | Fail if validate report required but missing"
+  ansible.builtin.fail:
+    msg: >-
+      Validate report is required but missing: {{ _staging_dir }}/{{ falco_deploy_validate_report_filename }}.
+      Run validate role first, or set falco_deploy_require_validate_report=false.
+  when:
+    - falco_deploy_require_validate_report | bool
+    - not _valrep_stat.stat.exists
+
+- name: "deploy | Load validate report"
+  ansible.builtin.slurp:
+    src: "{{ _staging_dir }}/{{ falco_deploy_validate_report_filename }}"
+  register: _valrep
+  when:
+    - falco_deploy_require_validate_report | bool
+    - _valrep_stat.stat.exists
+
+- name: "deploy | Parse validate report"
+  ansible.builtin.set_fact:
+    _valrep_parsed: "{{ (_valrep.content | b64decode) | from_yaml }}"
+  when:
+    - falco_deploy_require_validate_report | bool
+    - _valrep_stat.stat.exists
+
+- name: "deploy | Fail if validate report rc != 0"
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to deploy because validation did not succeed.
+      validate rc={{ _valrep_parsed.validation.rc | default('UNKNOWN') }}.
+      See {{ _staging_dir }}/{{ falco_deploy_validate_report_filename }} for details.
+  when:
+    - falco_deploy_require_validate_report | bool
+    - (_valrep_parsed.validation.rc | default(1) | int) != 0
+
+# Discover deployable rules strictly
+- name: "deploy | Find deployable Falco rule YAML files in staging (strict patterns)"
+  ansible.builtin.find:
+    paths: "{{ _staging_dir }}"
+    patterns: "{{ falco_deploy_rule_file_globs }}"
+    recurse: true
+    file_type: file
+  register: _found_rules
+
+- name: "deploy | Build deploy rule file list"
+  ansible.builtin.set_fact:
+    _rule_files: "{{ _found_rules.files | map(attribute='path') | list }}"
+
+- name: "deploy | Fail if no deployable rule files found"
+  ansible.builtin.fail:
+    msg: >-
+      No deployable Falco rule YAML files found under staging dir {{ _staging_dir }} using patterns
+      {{ falco_deploy_rule_file_globs }}.
+  when: (_rule_files | length) == 0
+
+# Compute version id from staging directory name (timestamp leaf)
+- name: "deploy | Compute version id from staging dir name"
+  ansible.builtin.set_fact:
+    _version_id: "{{ (_staging_dir | basename) | trim }}"
+
+- name: "deploy | Ensure versions root exists"
+  ansible.builtin.file:
+    path: "{{ falco_deploy_versions_root }}"
+    state: directory
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_dir_mode }}"
+
+- name: "deploy | Set target version directory"
+  ansible.builtin.set_fact:
+    _target_version_dir: "{{ falco_deploy_versions_root }}/{{ _version_id }}"
+
+- name: "deploy | Create target version directory"
+  ansible.builtin.file:
+    path: "{{ _target_version_dir }}"
+    state: directory
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_dir_mode }}"
+
+# Compute per-file relative path and destination dir, and create needed directories first
+- name: "deploy | Build deployment plan for rule files"
+  ansible.builtin.set_fact:
+    _deploy_plan: "{{ _deploy_plan | default([]) + [ _entry ] }}"
+  vars:
+    _rel: "{{ item | regex_replace('^' ~ (_staging_dir | regex_escape) ~ '/', '') }}"
+    _dest: "{{ _target_version_dir }}/{{ _rel }}"
+    _dest_dir: "{{ _dest | dirname }}"
+    _entry:
+      src: "{{ item }}"
+      rel: "{{ _rel }}"
+      dest: "{{ _dest }}"
+      dest_dir: "{{ _dest_dir }}"
+  loop: "{{ _rule_files }}"
+
+- name: "deploy | Ensure destination directories exist for rule files"
+  ansible.builtin.file:
+    path: "{{ item.dest_dir }}"
+    state: directory
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_dir_mode }}"
+  loop: "{{ _deploy_plan }}"
+  loop_control:
+    label: "{{ item.dest_dir }}"
+
+- name: "deploy | Copy rule files into version directory (preserve relative paths)"
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_file_mode }}"
+    remote_src: true
+  loop: "{{ _deploy_plan }}"
+  loop_control:
+    label: "{{ item.rel }}"
+
+# Record what we deployed (manifest + validate report if present)
+- name: "deploy | Copy staging manifest if present"
+  ansible.builtin.copy:
+    src: "{{ _staging_dir }}/manifest.yml"
+    dest: "{{ _target_version_dir }}/manifest.yml"
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_file_mode }}"
+    remote_src: true
+  when: (lookup('ansible.builtin.fileglob', _staging_dir ~ '/manifest.yml', errors='ignore') | length) > 0
+
+- name: "deploy | Copy validate report if present"
+  ansible.builtin.copy:
+    src: "{{ _staging_dir }}/{{ falco_deploy_validate_report_filename }}"
+    dest: "{{ _target_version_dir }}/{{ falco_deploy_validate_report_filename }}"
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_file_mode }}"
+    remote_src: true
+  when: (lookup('ansible.builtin.fileglob', _staging_dir ~ '/' ~ falco_deploy_validate_report_filename, errors='ignore') | length) > 0
+
+# Determine current symlink target (if exists), so we can set previous for rollback
+- name: "deploy | Read current symlink"
+  ansible.builtin.stat:
+    path: "{{ falco_deploy_current_symlink }}"
+  register: _current_link
+
+- name: "deploy | Capture current deployed target (if any)"
+  ansible.builtin.set_fact:
+    _current_target: "{{ _current_link.stat.lnk_source }}"
+  when: _current_link.stat.islnk | default(false)
+
+# Update previous symlink before switching current
+- name: "deploy | Ensure previous symlink points to prior current (if any)"
+  ansible.builtin.file:
+    src: "{{ _current_target }}"
+    dest: "{{ falco_deploy_previous_symlink }}"
+    state: link
+    force: true
+  when: _current_target is defined and (_current_target | length) > 0
+
+# Switch current symlink to new version (idempotent)
+- name: "deploy | Point current symlink to new version"
+  ansible.builtin.file:
+    src: "{{ _target_version_dir }}"
+    dest: "{{ falco_deploy_current_symlink }}"
+    state: link
+    force: true
+
+# Ensure config.d exists and write drop-in to load rules from current symlink
+- name: "deploy | Ensure falco config.d exists"
+  ansible.builtin.file:
+    path: "{{ falco_deploy_config_d }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "deploy | Write Falco rules drop-in config"
+  ansible.builtin.copy:
+    dest: "{{ falco_deploy_config_d }}/{{ falco_deploy_rules_dropin_filename }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible: security/ids/falco/deploy
+      rules_files:
+        - "{{ falco_deploy_current_symlink }}/falco_rules.yaml"
+        - "{{ falco_deploy_current_symlink }}/falco_rules.local.yaml"
+        - "{{ falco_deploy_current_symlink }}/rules.d"
+
+# Ensure expected override files/dirs exist under the deployed current (so Falco doesn't error if referenced)
+- name: "deploy | Ensure rules.d directory exists under current"
+  ansible.builtin.file:
+    path: "{{ falco_deploy_current_symlink }}/rules.d"
+    state: directory
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_dir_mode }}"
+
+- name: "deploy | Ensure falco_rules.local.yaml exists under current"
+  ansible.builtin.copy:
+    dest: "{{ falco_deploy_current_symlink }}/falco_rules.local.yaml"
+    owner: "{{ falco_deploy_owner }}"
+    group: "{{ falco_deploy_group }}"
+    mode: "{{ falco_deploy_file_mode }}"
+    force: false
+    content: |
+      # Local Falco rule customizations for this host/group.
+      []
+  when: not (lookup('ansible.builtin.fileglob', falco_deploy_current_symlink ~ '/falco_rules.local.yaml', errors='ignore') | length > 0)
+
+# Expose facts for reload/report roles
+- name: "deploy | Expose deploy facts"
+  ansible.builtin.set_fact:
+    falco_deploy_version_id: "{{ _version_id }}"
+    falco_deploy_target_dir: "{{ _target_version_dir }}"
+    falco_deploy_current_link: "{{ falco_deploy_current_symlink }}"
+    falco_deploy_previous_link: "{{ falco_deploy_previous_symlink }}"

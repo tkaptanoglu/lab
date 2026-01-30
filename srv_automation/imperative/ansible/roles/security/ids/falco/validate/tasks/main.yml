@@ -114,27 +114,26 @@
   changed_when: false
   failed_when: _validate_cmd.rc != 0
 
+# Write report as a proper YAML structure by serializing a dict
+- name: "validate | Build validation report object"
+  ansible.builtin.set_fact:
+    _validate_report_obj:
+      staging_dir: "{{ _staging_dir }}"
+      validated_at_utc: "{{ ansible_date_time.iso8601 }}"
+      falco_bin: "{{ falco_validate_falco_bin }}"
+      manifest_present: "{{ _manifest_stat.stat.exists | default(false) | bool }}"
+      artifacts: "{{ _artifacts | default([]) }}"
+      rule_files: "{{ _rule_files }}"
+      validation:
+        rc: "{{ _validate_cmd.rc }}"
+        stdout: "{{ _validate_cmd.stdout | default('') }}"
+        stderr: "{{ _validate_cmd.stderr | default('') }}"
+
 - name: "validate | Write validation report"
   ansible.builtin.copy:
     dest: "{{ _staging_dir }}/{{ falco_validate_report_filename }}"
     mode: "0644"
-    content: |
-      staging_dir: "{{ _staging_dir }}"
-      validated_at_utc: "{{ ansible_date_time.iso8601 }}"
-      falco_bin: "{{ falco_validate_falco_bin }}"
-      manifest_present: {{ _manifest_stat.stat.exists | default(false) | bool }}
-      artifacts: {{ (_artifacts | default([])) | to_nice_yaml(indent=2) | indent(2) }}
-      rule_files_count: {{ _rule_files | length }}
-      rule_files:
-      {% for f in _rule_files %}
-        - "{{ f }}"
-      {% endfor %}
-      validation:
-        rc: {{ _validate_cmd.rc }}
-        stdout: |
-          {{ _validate_cmd.stdout | default('') | indent(10) }}
-        stderr: |
-          {{ _validate_cmd.stderr | default('') | indent(10) }}
+    content: "{{ _validate_report_obj | to_nice_yaml(indent=2) }}"
 
 - name: "validate | Expose facts for downstream roles"
   ansible.builtin.set_fact:

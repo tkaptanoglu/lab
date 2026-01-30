@@ -1,0 +1,36 @@
+# roles/security/ids/falco/deploy/defaults/main.yml
+
+# Where rules_source stages downloads
+falco_deploy_staging_root: /var/lib/falco/rules-staging
+
+# Where we keep deployed, versioned rulesets on the host
+falco_deploy_versions_root: /var/lib/falco/rules-versions
+
+# Symlink that points to the currently active deployed version
+falco_deploy_current_symlink: /var/lib/falco/rules-current
+
+# Optional symlink to previous version for rollback
+falco_deploy_previous_symlink: /var/lib/falco/rules-previous
+
+# Falco config drop-in directory (preferred vs editing /etc/falco/falco.yaml)
+falco_deploy_config_d: /etc/falco/config.d
+
+# Filename of the drop-in we manage
+falco_deploy_rules_dropin_filename: 20-rules-path-ansible.yaml
+
+# Strict patterns for rule files we will deploy
+falco_deploy_rule_file_globs:
+  - "falco_rules*.yml"
+  - "falco_rules*.yaml"
+  - "*.rules.yml"
+  - "*.rules.yaml"
+
+# Whether to require a successful validate report before deploying
+falco_deploy_require_validate_report: true
+falco_deploy_validate_report_filename: validate-report.yml
+
+# Ownership/mode of deployed files
+falco_deploy_owner: root
+falco_deploy_group: root
+falco_deploy_dir_mode: "0755"
+falco_deploy_file_mode: "0644"
