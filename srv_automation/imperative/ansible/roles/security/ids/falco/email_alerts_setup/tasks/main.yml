@@ -1,0 +1,389 @@
+# roles/security/ids/falco/email_alerts_setup/tasks/main.yml
+
+- name: "email_alerts_setup | Build effective config (defaults + overrides)"
+  ansible.builtin.set_fact:
+    falco_email_alerts_effective: "{{ _defaults | combine(falco_email_alerts | default({}), recursive=True) }}"
+  vars:
+    _defaults:
+      enabled: false
+
+      # Recipient email address (set in inventory/group_vars)
+      to: ""
+
+      # Email headers
+      from: "falco@localhost"
+      subject_prefix: "[Falco]"
+
+      # Where Falco should append JSON alert events
+      events_log: "/var/log/falco/events.jsonl"
+
+      # Falco config.d drop-in
+      falco_config_d: "/etc/falco/config.d"
+      falco_output_dropin_filename: "99-email-alerts-output.yaml"
+
+      # systemd service name for the tail+mailer daemon
+      service_name: "falco-email-alerts"
+
+      # Falco systemd service name (your host shows falco-bpf.service)
+      falco_service_name: "falco-bpf"
+
+      # Mailer script
+      script_path: "/usr/local/bin/falco_email_alerts.py"
+      state_dir: "/var/lib/falco"
+      state_file: "/var/lib/falco/falco_email_alerts.state"
+
+      # Root-only env file containing SMTP secrets + config
+      env_dir: "/etc/falco"
+      env_file: "/etc/falco/email-alerts.env"
+
+      # Behavior
+      start_at_end: true
+      include_json_in_body: true
+      rate_limit_seconds: 0
+
+      smtp:
+        host: ""
+        port: 587
+        username: ""
+        password: ""
+        starttls: true
+        verify_tls: true
+
+- name: "email_alerts_setup | Fail if enabled but recipient is not set"
+  ansible.builtin.fail:
+    msg: >-
+      falco_email_alerts.enabled=true but falco_email_alerts.to is empty.
+      Set it in inventory/group_vars/all/main.yml.
+  when:
+    - falco_email_alerts_effective.enabled | bool
+    - (falco_email_alerts_effective.to | default('') | trim) == ""
+
+- name: "email_alerts_setup | Fail if enabled but SMTP host is not set"
+  ansible.builtin.fail:
+    msg: >-
+      falco_email_alerts.enabled=true but falco_email_alerts.smtp.host is empty.
+      Set it in inventory/group_vars/all/main.yml.
+  when:
+    - falco_email_alerts_effective.enabled | bool
+    - (falco_email_alerts_effective.smtp.host | default('') | trim) == ""
+
+- name: "email_alerts_setup | Ensure required directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ falco_email_alerts_effective.falco_config_d }}"
+    - "{{ falco_email_alerts_effective.state_dir }}"
+    - "{{ falco_email_alerts_effective.events_log | dirname }}"
+    - "{{ falco_email_alerts_effective.env_dir }}"
+  when: falco_email_alerts_effective.enabled | bool
+
+- name: "email_alerts_setup | Ensure events log exists"
+  ansible.builtin.file:
+    path: "{{ falco_email_alerts_effective.events_log }}"
+    state: touch
+    mode: "0644"
+  when: falco_email_alerts_effective.enabled | bool
+
+- name: "email_alerts_setup | Configure Falco to output JSON alerts to file (config.d drop-in)"
+  ansible.builtin.copy:
+    dest: "{{ falco_email_alerts_effective.falco_config_d }}/{{ falco_email_alerts_effective.falco_output_dropin_filename }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible: security/ids/falco/email_alerts_setup
+      #
+      # Enable JSON output so we can parse each alert reliably.
+      json_output: true
+
+      # Append alerts to file. One JSON object per line.
+      file_output:
+        enabled: true
+        keep_alive: true
+        filename: "{{ falco_email_alerts_effective.events_log }}"
+  when: falco_email_alerts_effective.enabled | bool
+  notify: "email_alerts_setup | Restart Falco"
+
+- name: "email_alerts_setup | Install mailer daemon script (env-based; no secrets on argv)"
+  ansible.builtin.copy:
+    dest: "{{ falco_email_alerts_effective.script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import json
+      import os
+      import smtplib
+      import ssl
+      import sys
+      import time
+      from email.message import EmailMessage
+
+      def env_required(name: str) -> str:
+          val = os.environ.get(name, "")
+          if val.strip() == "":
+              print(f"Missing required environment variable: {name}", file=sys.stderr, flush=True)
+              sys.exit(2)
+          return val
+
+      def env_bool(name: str, default: bool = False) -> bool:
+          v = os.environ.get(name)
+          if v is None:
+              return default
+          return v.strip().lower() in ("1", "true", "yes", "y", "on")
+
+      def env_int(name: str, default: int = 0) -> int:
+          v = os.environ.get(name)
+          if v is None or v.strip() == "":
+              return default
+          try:
+              return int(v)
+          except Exception:
+              return default
+
+      def read_state(state_file: str) -> int:
+          try:
+              with open(state_file, "r", encoding="utf-8") as f:
+                  s = f.read().strip()
+                  return int(s) if s else 0
+          except FileNotFoundError:
+              return 0
+          except Exception:
+              return 0
+
+      def write_state(state_file: str, offset: int) -> None:
+          tmp = state_file + ".tmp"
+          os.makedirs(os.path.dirname(state_file), exist_ok=True)
+          with open(tmp, "w", encoding="utf-8") as f:
+              f.write(str(offset))
+          os.replace(tmp, state_file)
+
+      def safe_get(d: dict, *keys, default=""):
+          cur = d
+          for k in keys:
+              if not isinstance(cur, dict) or k not in cur:
+                  return default
+              cur = cur[k]
+          return cur
+
+      def build_subject(prefix: str, event: dict) -> str:
+          rule = safe_get(event, "rule", default="(no rule)")
+          prio = safe_get(event, "priority", default="")
+          if prio:
+              return f"{prefix} {prio} {rule}".strip()
+          return f"{prefix} {rule}".strip()
+
+      def build_body(event: dict, include_json: bool) -> str:
+          ts = safe_get(event, "time", default="")
+          rule = safe_get(event, "rule", default="")
+          prio = safe_get(event, "priority", default="")
+          output = safe_get(event, "output", default="")
+          hostname = safe_get(event, "hostname", default="")
+          tags = safe_get(event, "tags", default="")
+          fields = safe_get(event, "output_fields", default={})
+
+          lines = []
+          lines.append("Falco alert triggered")
+          if ts: lines.append(f"Time: {ts}")
+          if hostname: lines.append(f"Host: {hostname}")
+          if rule: lines.append(f"Rule: {rule}")
+          if prio: lines.append(f"Priority: {prio}")
+          if tags: lines.append(f"Tags: {tags}")
+
+          if output:
+              lines.append("")
+              lines.append("Output:")
+              lines.append(output)
+
+          if isinstance(fields, dict) and fields:
+              lines.append("")
+              lines.append("Fields:")
+              for k in sorted(fields.keys()):
+                  lines.append(f"  {k}: {fields[k]}")
+
+          if include_json:
+              lines.append("")
+              lines.append("Raw JSON:")
+              lines.append(json.dumps(event, indent=2, sort_keys=True))
+
+          return "\n".join(lines) + "\n"
+
+      def send_email(host: str, port: int, username: str, password: str, starttls: bool, verify_tls: bool,
+                     from_addr: str, to_addr: str, subject: str, body: str) -> None:
+          msg = EmailMessage()
+          msg["From"] = from_addr
+          msg["To"] = to_addr
+          msg["Subject"] = subject
+          msg.set_content(body)
+
+          context = ssl.create_default_context()
+          if not verify_tls:
+              context.check_hostname = False
+              context.verify_mode = ssl.CERT_NONE
+
+          with smtplib.SMTP(host, port, timeout=20) as server:
+              server.ehlo()
+              if starttls:
+                  server.starttls(context=context)
+                  server.ehlo()
+              if username:
+                  server.login(username, password)
+              server.send_message(msg)
+
+      def main():
+          # Required
+          events_log = env_required("FALCO_EMAIL_EVENTS_LOG")
+          state_file = env_required("FALCO_EMAIL_STATE_FILE")
+          to_addr = env_required("FALCO_EMAIL_TO")
+          from_addr = env_required("FALCO_EMAIL_FROM")
+          subject_prefix = os.environ.get("FALCO_EMAIL_SUBJECT_PREFIX", "[Falco]")
+
+          smtp_host = env_required("FALCO_EMAIL_SMTP_HOST")
+          smtp_port = env_int("FALCO_EMAIL_SMTP_PORT", 587)
+          smtp_username = os.environ.get("FALCO_EMAIL_SMTP_USERNAME", "")
+          smtp_password = os.environ.get("FALCO_EMAIL_SMTP_PASSWORD", "")
+          smtp_starttls = env_bool("FALCO_EMAIL_SMTP_STARTTLS", True)
+          smtp_verify_tls = env_bool("FALCO_EMAIL_SMTP_VERIFY_TLS", True)
+
+          start_at_end = env_bool("FALCO_EMAIL_START_AT_END", True)
+          include_json = env_bool("FALCO_EMAIL_INCLUDE_JSON_IN_BODY", True)
+          rate_limit_seconds = env_int("FALCO_EMAIL_RATE_LIMIT_SECONDS", 0)
+
+          os.makedirs(os.path.dirname(events_log), exist_ok=True)
+          with open(events_log, "a+", encoding="utf-8") as _f:
+              _f.flush()
+
+          f = open(events_log, "r", encoding="utf-8", errors="replace")
+
+          if start_at_end:
+              f.seek(0, os.SEEK_END)
+              write_state(state_file, f.tell())
+          else:
+              last = read_state(state_file)
+              try:
+                  if last > 0:
+                      f.seek(last, os.SEEK_SET)
+              except Exception:
+                  pass
+
+          last_sent_at = 0.0
+
+          while True:
+              where = f.tell()
+              line = f.readline()
+              if not line:
+                  time.sleep(0.25)
+                  f.seek(where)
+                  continue
+
+              write_state(state_file, f.tell())
+
+              line = line.strip()
+              if not line:
+                  continue
+
+              try:
+                  event = json.loads(line)
+              except Exception:
+                  continue
+
+              if rate_limit_seconds and rate_limit_seconds > 0:
+                  now = time.time()
+                  if (now - last_sent_at) < rate_limit_seconds:
+                      continue
+                  last_sent_at = now
+
+              subject = build_subject(subject_prefix, event)
+              body = build_body(event, include_json=include_json)
+
+              try:
+                  send_email(
+                      smtp_host, smtp_port, smtp_username, smtp_password,
+                      smtp_starttls, smtp_verify_tls,
+                      from_addr, to_addr, subject, body
+                  )
+              except Exception as e:
+                  print(f"EMAIL_SEND_ERROR: {e}", file=sys.stderr, flush=True)
+
+      if __name__ == "__main__":
+          main()
+  when: falco_email_alerts_effective.enabled | bool
+  notify: "email_alerts_setup | Restart email alerts service"
+
+- name: "email_alerts_setup | Write root-only EnvironmentFile (contains secrets) - DO NOT LOG"
+  ansible.builtin.copy:
+    dest: "{{ falco_email_alerts_effective.env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      # Managed by Ansible: security/ids/falco/email_alerts_setup
+      # Root-only. Keeps SMTP password out of systemd unit, systemctl output, and ps args.
+
+      FALCO_EMAIL_EVENTS_LOG="{{ falco_email_alerts_effective.events_log }}"
+      FALCO_EMAIL_STATE_FILE="{{ falco_email_alerts_effective.state_file }}"
+      FALCO_EMAIL_TO="{{ falco_email_alerts_effective.to }}"
+      FALCO_EMAIL_FROM="{{ falco_email_alerts_effective.from }}"
+      FALCO_EMAIL_SUBJECT_PREFIX="{{ falco_email_alerts_effective.subject_prefix }}"
+
+      FALCO_EMAIL_SMTP_HOST="{{ falco_email_alerts_effective.smtp.host }}"
+      FALCO_EMAIL_SMTP_PORT="{{ falco_email_alerts_effective.smtp.port }}"
+      FALCO_EMAIL_SMTP_USERNAME="{{ falco_email_alerts_effective.smtp.username }}"
+      FALCO_EMAIL_SMTP_PASSWORD="{{ falco_email_alerts_effective.smtp.password }}"
+      FALCO_EMAIL_SMTP_STARTTLS="{{ 'true' if (falco_email_alerts_effective.smtp.starttls | bool) else 'false' }}"
+      FALCO_EMAIL_SMTP_VERIFY_TLS="{{ 'true' if (falco_email_alerts_effective.smtp.verify_tls | bool) else 'false' }}"
+
+      FALCO_EMAIL_START_AT_END="{{ 'true' if (falco_email_alerts_effective.start_at_end | bool) else 'false' }}"
+      FALCO_EMAIL_INCLUDE_JSON_IN_BODY="{{ 'true' if (falco_email_alerts_effective.include_json_in_body | bool) else 'false' }}"
+      FALCO_EMAIL_RATE_LIMIT_SECONDS="{{ falco_email_alerts_effective.rate_limit_seconds | int }}"
+  when: falco_email_alerts_effective.enabled | bool
+  no_log: true
+  notify: "email_alerts_setup | Restart email alerts service"
+
+- name: "email_alerts_setup | Install systemd unit for email alerts service"
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ falco_email_alerts_effective.service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Falco email alerts (send email per Falco alert)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      Restart=always
+      RestartSec=2
+      User=root
+      Group=root
+
+      # Root-only env file. Keeps SMTP password out of systemd unit, systemctl output, and ps args.
+      EnvironmentFile={{ falco_email_alerts_effective.env_file }}
+
+      ExecStart={{ falco_email_alerts_effective.script_path }}
+
+      [Install]
+      WantedBy=multi-user.target
+  when: falco_email_alerts_effective.enabled | bool
+  notify: "email_alerts_setup | Restart email alerts service"
+
+- name: "email_alerts_setup | Enable and start email alerts service"
+  ansible.builtin.systemd:
+    name: "{{ falco_email_alerts_effective.service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: falco_email_alerts_effective.enabled | bool
+
+- name: "email_alerts_setup | Disable and stop email alerts service when disabled"
+  ansible.builtin.systemd:
+    name: "{{ falco_email_alerts_effective.service_name }}"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when: not (falco_email_alerts_effective.enabled | bool)

@@ -12,7 +12,7 @@
   roles:
     - role: roles/security/ids/falco/installation
       vars:
-        falco_reinstall_if_present: true
+        falco_reinstall_if_present: false
         falco_purge_on_remove: true
 
         # eBPF-only install path (final working approach on ubuntu-raspi)
@@ -30,6 +30,7 @@
 
         # Optional: background artifact updates (off by default)
         falco_enable_artifact_follow: false
+    - role: roles/security/ids/falco/email_alerts_setup
     - role: roles/security/patching
       vars:
         server_autopatch_origins:

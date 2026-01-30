@@ -1,0 +1,42 @@
+# roles/security/ids/falco/email_alerts_setup/defaults/main.yml
+
+falco_email_alerts:
+  enabled: false
+
+  # Recipient email address (set in inventory/group_vars)
+  to: ""
+
+  # Email headers
+  from: "falco@localhost"
+  subject_prefix: "[Falco]"
+
+  # Where Falco should append JSON alert events
+  events_log: "/var/log/falco/events.jsonl"
+
+  # Falco config.d drop-in
+  falco_config_d: "/etc/falco/config.d"
+  falco_output_dropin_filename: "99-email-alerts-output.yaml"
+
+  # systemd service name for the tail+mailer daemon
+  service_name: "falco-email-alerts"
+
+  # Falco systemd service name
+  falco_service_name: "falco"
+
+  # Mailer script
+  script_path: "/usr/local/bin/falco_email_alerts.py"
+  state_dir: "/var/lib/falco"
+  state_file: "/var/lib/falco/falco_email_alerts.state"
+
+  # Behavior
+  start_at_end: true            # don't email historical alerts on first start
+  include_json_in_body: true
+  rate_limit_seconds: 0         # 0 disables rate limiting
+
+  smtp:
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    starttls: true
+    verify_tls: true

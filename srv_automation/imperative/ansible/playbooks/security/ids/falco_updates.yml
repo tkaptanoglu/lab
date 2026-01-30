@@ -6,9 +6,9 @@
 
   roles:
     - role: roles/security/ids/falco/discovery
-    - role: security/ids/falco/rules_source
-    - role: security/ids/falco/validate
-    - role: security/ids/falco/deploy
-    - role: security/ids/falco/reload
-    - role: security/ids/falco/report
+    - role: roles/security/ids/falco/rules_source
+    - role: rolessecurity/ids/falco/validate
+    - role: roles/security/ids/falco/deploy
+    - role: roles/security/ids/falco/reload
+    - role: roles/security/ids/falco/report
 

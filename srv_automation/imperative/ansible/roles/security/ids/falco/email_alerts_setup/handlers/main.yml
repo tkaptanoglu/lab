@@ -1,0 +1,13 @@
+# roles/security/ids/falco/email_alerts_setup/handlers/main.yml
+
+- name: "email_alerts_setup | Restart Falco"
+  ansible.builtin.systemd:
+    name: "{{ (falco_email_alerts_effective.falco_service_name | default('falco-bpf')) }}"
+    state: restarted
+    daemon_reload: true
+
+- name: "email_alerts_setup | Restart email alerts service"
+  ansible.builtin.systemd:
+    name: "{{ (falco_email_alerts_effective.service_name | default('falco-email-alerts')) }}"
+    state: restarted
+    daemon_reload: true
