@@ -1,0 +1,8 @@
+---
+# orchestration/k8s/master.yml
+# Purpose: Create a k8s control plane who also is a worker in the cluster
+
+- import_playbook: orchestration/k8s/readiness.yml
+- import_playbook: ../../playbooks/k8s/helm.yml
+- import_playbook: ../../playbooks/k8s/master.yml
+
