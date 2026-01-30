@@ -7,6 +7,34 @@
   ansible.builtin.apt:
     update_cache: yes
 
+- name: Reboot while unattended-upgrades is running
+  become: yes
+  block:
+    - name: Check if unattended-upgrades is running
+      ansible.builtin.command: pgrep -f unattended-upgrades
+      register: unattended_pgrep
+      changed_when: false
+      failed_when: false
+
+    - name: Reboot if unattended-upgrades is running
+      ansible.builtin.reboot:
+        msg: "Rebooting because unattended-upgrades is running; will re-check after boot."
+        reboot_timeout: 1800
+        connect_timeout: 10
+        post_reboot_delay: 10
+      when: unattended_pgrep.rc == 0
+
+    # Re-check AFTER the (possible) reboot so `until` sees the current state
+    - name: Re-check if unattended-upgrades is running
+      ansible.builtin.command: pgrep -f unattended-upgrades
+      register: unattended_pgrep
+      changed_when: false
+      failed_when: false
+
+  until: unattended_pgrep.rc != 0   # stop looping when it's NOT running
+  retries: 60                       # max "iterations" (and potential reboots)
+  delay: 0
+
 - name: Upgrade all installed packages
   become: yes
   ansible.builtin.apt:
@@ -17,4 +45,3 @@
 - name: Report completion
   ansible.builtin.debug:
     msg: "Done updating and upgrading packages."
-
