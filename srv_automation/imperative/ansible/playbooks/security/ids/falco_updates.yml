@@ -10,7 +10,5 @@
     - role: security/ids/falco/validate
     - role: security/ids/falco/deploy
     - role: security/ids/falco/reload
-
-    # later stages:
-    # - role: security/ids/falco/report
+    - role: security/ids/falco/report
 

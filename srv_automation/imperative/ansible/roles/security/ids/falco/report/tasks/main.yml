@@ -1,0 +1,240 @@
+# roles/security/ids/falco/report/tasks/main.yml
+
+- name: "report | Gather service facts"
+  ansible.builtin.service_facts:
+
+# -------------------------
+# Determine staging dir
+# -------------------------
+- name: "report | Use staging dir from validate role if available"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ falco_validate_staging_dir }}"
+  when: falco_validate_staging_dir is defined and (falco_validate_staging_dir | length > 0)
+
+- name: "report | Use staging dir from rules_source role if validate fact not set"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ falco_rules_source_staging_dir }}"
+  when:
+    - _staging_dir is not defined
+    - falco_rules_source_staging_dir is defined
+    - (falco_rules_source_staging_dir | length > 0)
+
+- name: "report | Read last fetch lockfile when staging dir fact is not set"
+  ansible.builtin.slurp:
+    src: "{{ falco_report_staging_root }}/.last_fetch.yml"
+  register: _last_fetch
+  changed_when: false
+  failed_when: false
+  when: _staging_dir is not defined
+
+- name: "report | Parse lockfile YAML"
+  ansible.builtin.set_fact:
+    _last_fetch_parsed: "{{ (_last_fetch.content | default('') | b64decode | from_yaml) }}"
+  when:
+    - _staging_dir is not defined
+    - _last_fetch is defined
+    - (_last_fetch.content | default('') | length) > 0
+
+- name: "report | Set staging dir from lockfile"
+  ansible.builtin.set_fact:
+    _staging_dir: "{{ _last_fetch_parsed.staging_dir }}"
+  when:
+    - _staging_dir is not defined
+    - _last_fetch_parsed is defined
+    - (_last_fetch_parsed.staging_dir | default('') | length) > 0
+
+- name: "report | Stat staging dir (if any)"
+  ansible.builtin.stat:
+    path: "{{ _staging_dir }}"
+  register: _staging_stat
+  changed_when: false
+  failed_when: false
+  when: _staging_dir is defined
+
+# -------------------------
+# Deployed symlinks status
+# -------------------------
+- name: "report | Stat deploy current symlink"
+  ansible.builtin.stat:
+    path: "{{ falco_report_current_symlink }}"
+  register: _current_link
+  changed_when: false
+  failed_when: false
+
+- name: "report | Stat deploy previous symlink"
+  ansible.builtin.stat:
+    path: "{{ falco_report_previous_symlink }}"
+  register: _previous_link
+  changed_when: false
+  failed_when: false
+
+- name: "report | Derive deployed version from current symlink target"
+  ansible.builtin.set_fact:
+    _deployed_version: "{{ (_current_link.stat.lnk_source | default('') | basename) }}"
+  when: _current_link.stat.islnk | default(false)
+
+# -------------------------
+# Reload marker status
+# -------------------------
+- name: "report | Read reload state marker (if present)"
+  ansible.builtin.slurp:
+    src: "{{ falco_report_reload_state_file }}"
+  register: _reload_state_raw
+  changed_when: false
+  failed_when: false
+
+- name: "report | Parse reload state marker"
+  ansible.builtin.set_fact:
+    _reload_last_applied: "{{ (_reload_state_raw.content | default('') | b64decode | trim) }}"
+  when: (_reload_state_raw.content | default('') | length) > 0
+
+# -------------------------
+# Validation report status
+# -------------------------
+- name: "report | Check for validate report in staging (if staging exists)"
+  ansible.builtin.stat:
+    path: "{{ _staging_dir }}/{{ falco_report_validate_report_filename }}"
+  register: _valrep_stat
+  changed_when: false
+  failed_when: false
+  when:
+    - _staging_dir is defined
+    - _staging_stat is defined
+    - (_staging_stat.stat.exists | default(false)) | bool
+
+- name: "report | Load validate report"
+  ansible.builtin.slurp:
+    src: "{{ _staging_dir }}/{{ falco_report_validate_report_filename }}"
+  register: _valrep
+  changed_when: false
+  failed_when: false
+  when:
+    - _valrep_stat is defined
+    - (_valrep_stat.stat.exists | default(false)) | bool
+
+- name: "report | Parse validate report (best effort)"
+  ansible.builtin.set_fact:
+    _valrep_parsed: "{{ (_valrep.content | default('') | b64decode | from_yaml) }}"
+  when:
+    - _valrep is defined
+    - (_valrep.content | default('') | length) > 0
+
+- name: "report | Extract validate rc"
+  ansible.builtin.set_fact:
+    _validate_rc: "{{ _valrep_parsed.validation.rc | default('UNKNOWN') }}"
+  when: _valrep_parsed is defined
+
+- name: "report | Fail if validation error policy is enabled"
+  ansible.builtin.fail:
+    msg: >-
+      Validation report indicates failure (rc={{ _validate_rc }}). Refusing to continue because
+      falco_report_fail_on_validation_error=true.
+  when:
+    - falco_report_fail_on_validation_error | bool
+    - _validate_rc is defined
+    - (_validate_rc | string) != "0"
+
+# -------------------------
+# Falco version
+# -------------------------
+- name: "report | Check falco binary exists"
+  ansible.builtin.stat:
+    path: "{{ falco_report_falco_bin }}"
+  register: _falco_bin_stat
+  changed_when: false
+  failed_when: false
+
+- name: "report | Get falco version (best effort)"
+  ansible.builtin.command:
+    argv:
+      - "{{ falco_report_falco_bin }}"
+      - "--version"
+  register: _falco_version_cmd
+  changed_when: false
+  failed_when: false
+  when: _falco_bin_stat.stat.exists | default(false)
+
+# -------------------------
+# Service status
+# -------------------------
+- name: "report | Set service facts"
+  ansible.builtin.set_fact:
+    _service_key: "{{ falco_report_service_name ~ '.service' }}"
+    _service_info: "{{ ansible_facts.services[falco_report_service_name ~ '.service'] | default({}) }}"
+
+# -------------------------
+# Build report data
+# -------------------------
+- name: "report | Build report structure"
+  ansible.builtin.set_fact:
+    _report:
+      generated_at_utc: "{{ ansible_date_time.iso8601 }}"
+      host: "{{ inventory_hostname }}"
+      staging:
+        dir: "{{ _staging_dir | default('') }}"
+        exists: "{{ (_staging_stat.stat.exists | default(false)) | bool if _staging_stat is defined else false }}"
+        lockfile: "{{ falco_report_staging_root }}/.last_fetch.yml"
+      deploy:
+        current_symlink: "{{ falco_report_current_symlink }}"
+        current_is_symlink: "{{ (_current_link.stat.islnk | default(false)) | bool }}"
+        current_target: "{{ _current_link.stat.lnk_source | default('') }}"
+        deployed_version: "{{ _deployed_version | default('') }}"
+        previous_symlink: "{{ falco_report_previous_symlink }}"
+        previous_is_symlink: "{{ (_previous_link.stat.islnk | default(false)) | bool }}"
+        previous_target: "{{ _previous_link.stat.lnk_source | default('') }}"
+      validate:
+        report_filename: "{{ falco_report_validate_report_filename }}"
+        report_path: "{{ (_staging_dir ~ '/' ~ falco_report_validate_report_filename) if (_staging_dir is defined) else '' }}"
+        report_present: "{{ (_valrep_stat.stat.exists | default(false)) | bool if _valrep_stat is defined else false }}"
+        rc: "{{ _validate_rc | default('UNKNOWN') }}"
+      reload:
+        state_file: "{{ falco_report_reload_state_file }}"
+        last_applied_version: "{{ _reload_last_applied | default('') }}"
+      falco:
+        bin: "{{ falco_report_falco_bin }}"
+        bin_present: "{{ (_falco_bin_stat.stat.exists | default(false)) | bool }}"
+        version_stdout: "{{ _falco_version_cmd.stdout | default('') }}"
+        version_stderr: "{{ _falco_version_cmd.stderr | default('') }}"
+      service:
+        name: "{{ falco_report_service_name }}"
+        systemd_unit: "{{ _service_key }}"
+        known: "{{ (_service_info | length) > 0 }}"
+        state: "{{ _service_info.state | default('unknown') }}"
+        status: "{{ _service_info.status | default('unknown') }}"
+
+# -------------------------
+# Write reports
+# -------------------------
+- name: "report | Ensure persistent output directory exists"
+  ansible.builtin.file:
+    path: "{{ falco_report_output_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "report | Write persistent report"
+  ansible.builtin.copy:
+    dest: "{{ falco_report_output_dir }}/{{ falco_report_output_filename }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ _report | to_nice_yaml(indent=2) }}"
+
+- name: "report | Write report into staging dir (if staging exists)"
+  ansible.builtin.copy:
+    dest: "{{ _staging_dir }}/{{ falco_report_staging_report_filename }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ _report | to_nice_yaml(indent=2) }}"
+  when:
+    - _staging_dir is defined
+    - _staging_stat is defined
+    - (_staging_stat.stat.exists | default(false)) | bool
+
+# Expose facts for whatever comes next (or for debug)
+- name: "report | Expose report facts"
+  ansible.builtin.set_fact:
+    falco_report_data: "{{ _report }}"
+    falco_report_path: "{{ falco_report_output_dir }}/{{ falco_report_output_filename }}"

@@ -1,0 +1,34 @@
+# roles/security/ids/falco/report/defaults/main.yml
+
+# Where to find staging lockfile if staging dir isn't provided via facts
+falco_report_staging_root: /var/lib/falco/rules-staging
+
+# Where deploy role keeps "current" symlink
+falco_report_current_symlink: /var/lib/falco/rules-current
+
+# Where deploy role keeps "previous" symlink (optional)
+falco_report_previous_symlink: /var/lib/falco/rules-previous
+
+# Where reload role stores last applied version marker
+falco_report_reload_state_file: /var/lib/falco/.falco_rules_version
+
+# Falco binary path (used for --version)
+falco_report_falco_bin: /usr/bin/falco
+
+# systemd service name for Falco
+falco_report_service_name: falco
+
+# Validation report filename (produced by validate role)
+falco_report_validate_report_filename: validate-report.yml
+
+# Report filename to write under staging dir (if staging dir exists)
+falco_report_staging_report_filename: falco-pipeline-report.yml
+
+# Persistent report directory (always written)
+falco_report_output_dir: /var/lib/falco/reports
+
+# Persistent report filename (one per host)
+falco_report_output_filename: falco-pipeline-report.yml
+
+# If true, fail if validate report exists but indicates rc != 0 (policy)
+falco_report_fail_on_validation_error: false
