@@ -1,0 +1,2 @@
+# roles/security/ids/falco/rules_source/vars/main.yml
+# You can keep vars empty. This file exists for future provider-specific mappings if you add Git providers later.

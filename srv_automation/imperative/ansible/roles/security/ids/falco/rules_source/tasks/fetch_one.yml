@@ -1,0 +1,120 @@
+# roles/security/ids/falco/rules_source/tasks/fetch_one.yml
+
+- name: "rules_source | Determine reference (tag/digest/version) for {{ _artifact.name }} (whitespace-safe)"
+  ansible.builtin.set_fact:
+    _ref: >-
+      {% if (_artifact.digest is defined) and ((_artifact.digest | string | trim) | length > 0) %}
+      {{ (_artifact.name | string | trim) ~ '@' ~ (_artifact.digest | string | trim) }}
+      {% elif (_artifact.tag is defined) and ((_artifact.tag | string | trim) | length > 0) %}
+      {{ (_artifact.name | string | trim) ~ ':' ~ (_artifact.tag | string | trim) }}
+      {% else %}
+      {{ (_artifact.name | string | trim) ~ ':' ~ ((_artifact.version | default('latest')) | string | trim) }}
+      {% endif %}
+
+- name: "rules_source | Normalize ref (trim)"
+  ansible.builtin.set_fact:
+    _ref: "{{ _ref | trim }}"
+
+- name: "rules_source | Set artifact target dir for {{ _artifact.name }}"
+  ansible.builtin.set_fact:
+    _target_dir: "{{ falco_rules_source_staging_dir }}/{{ (_artifact.install_subdir | default(_artifact.name)) | string | trim }}"
+
+- name: "rules_source | Ensure target dir exists for {{ _artifact.name }}"
+  ansible.builtin.file:
+    path: "{{ _target_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: "rules_source | Attempt install via configured indexes: {{ _ref }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ falco_rules_source_falcoctl_bin }}"
+      - artifact
+      - install
+      - "{{ _ref }}"
+      - "{{ falco_rules_source_install_dir_flag }}"
+      - "{{ _target_dir }}"
+  register: _install_indexed
+  changed_when: true
+  failed_when: false
+
+- name: "rules_source | Determine if we should retry using fallback OCI ref"
+  ansible.builtin.set_fact:
+    _should_retry_fallback: >-
+      {{
+        (falco_rules_source_enable_fallback_oci | bool) and
+        (_install_indexed.rc != 0) and
+        (
+          ('cannot find' in ((_install_indexed.stdout | default('')) | lower)) or
+          ('cannot find' in ((_install_indexed.stderr | default('')) | lower))
+        )
+      }}
+
+- name: "rules_source | Build fallback OCI ref"
+  ansible.builtin.set_fact:
+    _fallback_ref: "{{ falco_rules_source_fallback_registry | trim }}/{{ falco_rules_source_fallback_repository | trim }}/{{ _ref }}"
+  when: _should_retry_fallback | bool
+
+- name: "rules_source | Retry install via fallback OCI ref: {{ _fallback_ref }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ falco_rules_source_falcoctl_bin }}"
+      - artifact
+      - install
+      - "{{ _fallback_ref }}"
+      - "{{ falco_rules_source_install_dir_flag }}"
+      - "{{ _target_dir }}"
+  register: _install_fallback
+  changed_when: true
+  failed_when: false
+  when: _should_retry_fallback | bool
+
+- name: "rules_source | Select final install result"
+  ansible.builtin.set_fact:
+    _install_final: >-
+      {{
+        (_install_fallback if (_should_retry_fallback | bool) else _install_indexed)
+      }}
+
+- name: "rules_source | Fail if install ultimately failed for {{ _artifact.name }}"
+  ansible.builtin.fail:
+    msg: >-
+      falcoctl artifact install failed for {{ _artifact.name }}.
+      First attempt ref="{{ _ref }}" rc={{ _install_indexed.rc }} stdout="{{ _install_indexed.stdout | default('') }}" stderr="{{ _install_indexed.stderr | default('') }}".
+      {% if _should_retry_fallback | bool %}
+      Fallback attempt ref="{{ _fallback_ref }}" rc={{ _install_fallback.rc }} stdout="{{ _install_fallback.stdout | default('') }}" stderr="{{ _install_fallback.stderr | default('') }}".
+      {% endif %}
+  when: _install_final.rc != 0
+
+- name: "rules_source | Write per-artifact install log"
+  ansible.builtin.copy:
+    dest: "{{ _target_dir }}/install.log"
+    mode: "0644"
+    content: |
+      artifact_name: "{{ _artifact.name }}"
+      install_dir_flag: "{{ falco_rules_source_install_dir_flag }}"
+      target_dir: "{{ _target_dir }}"
+
+      primary_ref: "{{ _ref }}"
+      primary_rc: {{ _install_indexed.rc }}
+      primary_stdout: |
+        {{ _install_indexed.stdout | default('') | indent(8) }}
+      primary_stderr: |
+        {{ _install_indexed.stderr | default('') | indent(8) }}
+
+      fallback_enabled: {{ falco_rules_source_enable_fallback_oci | bool }}
+      fallback_attempted: {{ _should_retry_fallback | bool }}
+      {% if _should_retry_fallback | bool %}
+      fallback_ref: "{{ _fallback_ref }}"
+      fallback_rc: {{ _install_fallback.rc }}
+      fallback_stdout: |
+        {{ _install_fallback.stdout | default('') | indent(8) }}
+      fallback_stderr: |
+        {{ _install_fallback.stderr | default('') | indent(8) }}
+      {% endif %}
+
+      final_rc: {{ _install_final.rc }}
+      final_stdout: |
+        {{ _install_final.stdout | default('') | indent(8) }}
+      final_stderr: |
+        {{ _install_final.stderr | default('') | indent(8) }}

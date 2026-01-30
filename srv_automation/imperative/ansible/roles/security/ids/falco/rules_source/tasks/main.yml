@@ -1,0 +1,127 @@
+# roles/security/ids/falco/rules_source/tasks/main.yml
+
+- name: "rules_source | Assert falcoctl is present"
+  ansible.builtin.stat:
+    path: "{{ falco_rules_source_falcoctl_bin }}"
+  register: _falcoctl_stat
+
+- name: "rules_source | Fail if falcoctl is missing"
+  ansible.builtin.fail:
+    msg: "falcoctl not found at {{ falco_rules_source_falcoctl_bin }}. Install it in a prior role."
+  when: not _falcoctl_stat.stat.exists
+
+- name: "rules_source | Detect falcoctl install directory flag"
+  ansible.builtin.command:
+    argv:
+      - "{{ falco_rules_source_falcoctl_bin }}"
+      - artifact
+      - install
+      - --help
+  register: _falcoctl_install_help
+  changed_when: false
+  failed_when: _falcoctl_install_help.rc != 0
+
+- name: "rules_source | Set falcoctl install directory flag fact (whitespace-safe)"
+  ansible.builtin.set_fact:
+    falco_rules_source_install_dir_flag: >-
+      {% set help = ((_falcoctl_install_help.stdout | default('')) ~ '\n' ~ (_falcoctl_install_help.stderr | default(''))) %}
+      {% if ('--rulesfiles-dir' in help) %}
+      {{ '--rulesfiles-dir' }}
+      {% elif ('--dest-dir' in help) %}
+      {{ '--dest-dir' }}
+      {% else %}
+      {{ '__UNKNOWN__' }}
+      {% endif %}
+  vars:
+    # ensure Ansible treats the output as a clean scalar
+    _noop: ""
+
+- name: "rules_source | Normalize falcoctl install directory flag (trim)"
+  ansible.builtin.set_fact:
+    falco_rules_source_install_dir_flag: "{{ falco_rules_source_install_dir_flag | trim }}"
+
+- name: "rules_source | Fail if falcoctl install directory flag is unknown"
+  ansible.builtin.fail:
+    msg: >-
+      Could not determine which directory flag your falcoctl supports for 'artifact install'.
+      Expected '--rulesfiles-dir' (common) or '--dest-dir', but neither was found in:
+      {{ falco_rules_source_falcoctl_bin }} artifact install --help
+  when: falco_rules_source_install_dir_flag == "__UNKNOWN__"
+
+- name: "rules_source | Ensure staging root exists"
+  ansible.builtin.file:
+    path: "{{ falco_rules_source_staging_root }}"
+    state: directory
+    mode: "0755"
+
+- name: "rules_source | Add official falcoctl index (if enabled)"
+  ansible.builtin.command:
+    argv:
+      - "{{ falco_rules_source_falcoctl_bin }}"
+      - index
+      - add
+      - "{{ falco_rules_source_index_name }}"
+      - "{{ falco_rules_source_index_url }}"
+  register: _index_add
+  changed_when: >
+    ('added' in (_index_add.stdout | lower)) or
+    ('added' in (_index_add.stderr | lower))
+  failed_when: >
+    (_index_add.rc != 0) and
+    ('already exists' not in (_index_add.stderr | lower)) and
+    ('already exists' not in (_index_add.stdout | lower))
+  when: falco_rules_source_index_enabled
+
+- name: "rules_source | Create per-run staging dir (timestamped)"
+  ansible.builtin.command:
+    cmd: "date -u +%Y%m%dT%H%M%SZ"
+  register: _ts
+  changed_when: false
+
+- name: "rules_source | Set staging directory fact"
+  ansible.builtin.set_fact:
+    falco_rules_source_staging_dir: "{{ falco_rules_source_staging_root }}/{{ _ts.stdout }}"
+
+- name: "rules_source | Ensure per-run staging dir exists"
+  ansible.builtin.file:
+    path: "{{ falco_rules_source_staging_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: "rules_source | Fetch each rules artifact into staging"
+  ansible.builtin.include_tasks: fetch_one.yml
+  loop: "{{ falco_rules_source_artifacts }}"
+  loop_control:
+    loop_var: _artifact
+
+- name: "rules_source | Write manifest for downstream roles"
+  ansible.builtin.copy:
+    dest: "{{ falco_rules_source_staging_dir }}/manifest.yml"
+    mode: "0644"
+    content: |
+      fetched_at_utc: "{{ _ts.stdout }}"
+      staging_dir: "{{ falco_rules_source_staging_dir }}"
+      falcoctl:
+        bin: "{{ falco_rules_source_falcoctl_bin }}"
+        install_dir_flag: "{{ falco_rules_source_install_dir_flag }}"
+      fallback_oci:
+        enabled: {{ falco_rules_source_enable_fallback_oci | bool }}
+        registry: "{{ falco_rules_source_fallback_registry }}"
+        repository: "{{ falco_rules_source_fallback_repository }}"
+      artifacts:
+      {% for a in falco_rules_source_artifacts %}
+        - name: "{{ a.name }}"
+          version: "{{ a.version | default('latest') }}"
+          digest: "{{ a.digest | default('') }}"
+          tag: "{{ a.tag | default('') }}"
+          install_subdir: "{{ a.install_subdir | default(a.name) }}"
+      {% endfor %}
+
+- name: "rules_source | Update lockfile (optional) to record latest staging dir"
+  ansible.builtin.copy:
+    dest: "{{ falco_rules_source_staging_root }}/.last_fetch.yml"
+    mode: "0644"
+    content: |
+      fetched_at_utc: "{{ _ts.stdout }}"
+      staging_dir: "{{ falco_rules_source_staging_dir }}"
+  when: falco_rules_source_use_lockfile

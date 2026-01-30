@@ -1,0 +1,36 @@
+# roles/security/ids/falco/rules_source/defaults/main.yml
+
+# Where to place downloaded rules (staging). Deploy role can promote to /etc/falco later.
+falco_rules_source_staging_root: /var/lib/falco/rules-staging
+
+# Where Falco expects rules eventually (deploy role owns switching to this path)
+falco_rules_source_active_root: /etc/falco
+
+# falcoctl binary location
+falco_rules_source_falcoctl_bin: /usr/bin/falcoctl
+
+# falcoctl index settings (official)
+falco_rules_source_index_enabled: true
+falco_rules_source_index_name: falcosecurity
+falco_rules_source_index_url: "https://falcosecurity.github.io/falcoctl/index.yaml"
+
+# If true, write a lockfile pointing to the most recent staging directory
+falco_rules_source_use_lockfile: true
+
+# Artifacts to fetch via falcoctl.
+# Each entry:
+#   name: falco-rules | falco-incubating-rules | falco-sandbox-rules | custom
+#   version: "latest" OR tag: "x.y.z" OR digest: "sha256:..."
+#   install_subdir: directory name under the per-run staging dir
+falco_rules_source_artifacts:
+  - name: falco-rules
+    version: "latest"
+    install_subdir: "stable"
+
+# Fallback OCI location if the configured indexes can't resolve short artifact names.
+# Official Falco artifacts are commonly hosted on GitHub Container Registry (ghcr.io).
+# This role will retry with:
+#   {{ falco_rules_source_fallback_registry }}/{{ falco_rules_source_fallback_repository }}/<artifact_ref>
+falco_rules_source_enable_fallback_oci: true
+falco_rules_source_fallback_registry: "ghcr.io"
+falco_rules_source_fallback_repository: "falcosecurity/rules"
