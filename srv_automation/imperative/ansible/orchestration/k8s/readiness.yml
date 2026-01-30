@@ -2,6 +2,6 @@
 # orchestration/k8s/readiness.yml
 # Purpose: Create a worker node for a k8s cluster
 
-- import_playbook: orchestration/base/golden_image.yml
+- import_playbook: ../base/golden_image.yml
 - import_playbook: ../../playbooks/k8s/readiness.yml
 
