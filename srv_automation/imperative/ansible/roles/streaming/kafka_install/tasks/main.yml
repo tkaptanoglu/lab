@@ -1,0 +1,181 @@
+---
+- name: Install required packages (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name:
+      - curl
+      - tar
+      - gzip
+      - bash
+      - coreutils
+      - openjdk-17-jre-headless
+      - python3
+    state: present
+    update_cache: true
+  when: ansible_facts.os_family == "Debian"
+
+- name: Create kafka group
+  ansible.builtin.group:
+    name: "{{ kafka_group }}"
+    system: true
+    state: present
+
+- name: Create kafka user
+  ansible.builtin.user:
+    name: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0755"
+  loop:
+    - "{{ kafka_install_dir }}"
+    - "{{ kafka_data_dir }}"
+    - "{{ kafka_log_dir }}"
+
+- name: Download Kafka tarball (prefer dlcdn, fallback to archive)
+  block:
+    - name: Download from dlcdn.apache.org
+      ansible.builtin.get_url:
+        url: "https://dlcdn.apache.org/kafka/{{ kafka_version }}/kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+        dest: "/tmp/kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+        mode: "0644"
+  rescue:
+    - name: Download from archive.apache.org (fallback)
+      ansible.builtin.get_url:
+        url: "https://archive.apache.org/dist/kafka/{{ kafka_version }}/kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+        dest: "/tmp/kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+        mode: "0644"
+
+- name: Check whether Kafka appears extracted correctly
+  ansible.builtin.stat:
+    path: "/opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }}/config/kraft"
+  register: kafka_kraft_dir
+
+- name: Extract Kafka to /opt (versioned folder) if missing/invalid
+  ansible.builtin.unarchive:
+    src: "/tmp/kafka_{{ kafka_scala_version }}-{{ kafka_version }}.tgz"
+    dest: "/opt"
+    remote_src: true
+  when: not kafka_kraft_dir.stat.exists
+
+- name: Ensure extracted folder exists
+  ansible.builtin.stat:
+    path: "/opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }}"
+  register: kafka_extract_root
+
+- name: Fail if Kafka extraction folder is missing
+  ansible.builtin.assert:
+    that:
+      - kafka_extract_root.stat.exists
+      - kafka_extract_root.stat.isdir
+    fail_msg: >
+      Kafka extraction folder /opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }} not found.
+      The download may be corrupt or extraction failed.
+
+- name: Symlink current kafka to {{ kafka_install_dir }}
+  ansible.builtin.file:
+    src: "/opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }}"
+    dest: "{{ kafka_install_dir }}"
+    state: link
+    force: true
+
+- name: Ensure Kafka install ownership
+  ansible.builtin.file:
+    path: "/opt/kafka_{{ kafka_scala_version }}-{{ kafka_version }}"
+    state: directory
+    recurse: true
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+
+- name: Ensure Kraft config directory exists (safety net)
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}/config/kraft"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0755"
+
+- name: Assert kafka_cluster_id_effective is provided by kafka_cluster_id role
+  ansible.builtin.assert:
+    that:
+      - kafka_cluster_id_effective is defined
+      - kafka_cluster_id_effective | length > 10
+    fail_msg: >
+      kafka_cluster_id_effective is missing. Ensure the streaming/kafka_cluster_id role runs before streaming/kafka.
+
+# node.id: 1..N derived from inventory order of hosts IN THIS PLAY
+- name: Compute node.id for this broker
+  ansible.builtin.set_fact:
+    kafka_node_id: "{{ (ansible_play_hosts.index(inventory_hostname) + 1) | int }}"
+
+# controller.quorum.voters: "1@host1:9093,2@host2:9093,..."
+- name: Compute controller quorum voters
+  ansible.builtin.set_fact:
+    kafka_controller_quorum_voters: >-
+      {{
+        ansible_play_hosts
+        | zip(range(1, (ansible_play_hosts | length) + 1))
+        | map('reverse')
+        | map('list')
+        | map('join', '@')
+        | map('regex_replace', '$', ':' ~ (kafka_controller_port | string))
+        | list
+        | join(',')
+      }}
+
+- name: Render server.properties
+  ansible.builtin.template:
+    src: "server.properties.j2"
+    dest: "{{ kafka_install_dir }}/config/kraft/server.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0644"
+  notify: Restart Kafka
+
+- name: Render systemd unit
+  ansible.builtin.template:
+    src: "kafka.service.j2"
+    dest: "/etc/systemd/system/kafka.service"
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Kafka
+
+- name: Check if storage already formatted
+  ansible.builtin.stat:
+    path: "{{ kafka_data_dir }}/meta.properties"
+  register: kafka_meta
+
+- name: Format Kafka storage (KRaft) once
+  ansible.builtin.command: >
+    {{ kafka_install_dir }}/bin/kafka-storage.sh format
+    -t {{ kafka_cluster_id_effective }}
+    -c {{ kafka_install_dir }}/config/kraft/server.properties
+  become_user: "{{ kafka_user }}"
+  when: not kafka_meta.stat.exists
+
+- name: Enable and start Kafka
+  ansible.builtin.systemd:
+    name: kafka
+    enabled: true
+    state: started
+
+- name: Allow Kafka ports through UFW (optional)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "{{ kafka_client_port }}"
+    - "{{ kafka_controller_port }}"
+  when:
+    - kafka_manage_ufw | default(false) | bool
+    - ansible_facts.os_family == "Debian"

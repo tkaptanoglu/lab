@@ -1,0 +1,7 @@
+---
+- name: Install and provision Kafka (KRaft)
+  hosts: all
+  become: true
+  roles:
+    - role: streaming/kafka_cluster_id
+    - role: streaming/kafka_install

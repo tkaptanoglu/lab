@@ -1,0 +1,110 @@
+---
+# Guarantees kafka_cluster_id_effective is available to later roles.
+# Persists cluster id ON THE BROKER(S): {{ kafka_data_dir }}/cluster.id
+#
+# Priority:
+# 1) inventory var kafka_cluster_id (if defined + non-empty)
+# 2) broker file {{ kafka_data_dir }}/cluster.id (if exists)
+# 3) generate once on first broker, distribute, then persist
+
+- name: Ensure kafka_data_dir exists (for storing cluster.id)
+  ansible.builtin.file:
+    path: "{{ kafka_data_dir }}"
+    state: directory
+    owner: "{{ kafka_user | default('kafka') }}"
+    group: "{{ kafka_group | default('kafka') }}"
+    mode: "0755"
+
+- name: Initialize kafka_cluster_id_effective to empty
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: ""
+
+# 1) explicit var wins
+- name: Use kafka_cluster_id from inventory if provided
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: "{{ kafka_cluster_id | string | trim }}"
+  when:
+    - kafka_cluster_id is defined
+    - (kafka_cluster_id | string | trim | length) > 0
+
+# 2) else read from broker file if it exists
+- name: Check for existing broker-persisted cluster id file
+  ansible.builtin.stat:
+    path: "{{ kafka_data_dir }}/cluster.id"
+  register: kafka_cluster_id_file
+
+- name: Read existing broker-persisted cluster id
+  ansible.builtin.slurp:
+    path: "{{ kafka_data_dir }}/cluster.id"
+  register: kafka_cluster_id_slurp
+  when:
+    - kafka_cluster_id_effective | length == 0
+    - kafka_cluster_id_file.stat.exists
+
+- name: Set cluster id from broker file
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: "{{ kafka_cluster_id_slurp.content | b64decode | trim }}"
+  when:
+    - kafka_cluster_id_effective | length == 0
+    - kafka_cluster_id_slurp is defined
+    - kafka_cluster_id_slurp.content is defined
+    - (kafka_cluster_id_slurp.content | b64decode | trim | length) > 0
+
+# 3) else generate once on first broker and distribute
+- name: Check if kafka-storage.sh exists on first broker
+  ansible.builtin.stat:
+    path: "{{ kafka_install_dir }}/bin/kafka-storage.sh"
+  register: kafka_storage_sh
+  run_once: true
+  delegate_to: "{{ ansible_play_hosts[0] }}"
+  when: kafka_cluster_id_effective | length == 0
+
+- name: Generate cluster id on first broker (run once)
+  block:
+    - name: Prefer kafka-storage.sh random-uuid if present
+      ansible.builtin.command: "{{ kafka_install_dir }}/bin/kafka-storage.sh random-uuid"
+      register: kafka_cluster_id_generated
+      changed_when: false
+      when: kafka_storage_sh.stat.exists
+
+    - name: Fallback generate UUID using python3
+      ansible.builtin.command: python3 -c "import uuid; print(uuid.uuid4())"
+      register: kafka_cluster_id_generated
+      changed_when: false
+      when: not kafka_storage_sh.stat.exists
+  run_once: true
+  delegate_to: "{{ ansible_play_hosts[0] }}"
+  when: kafka_cluster_id_effective | length == 0
+
+- name: Broadcast generated cluster id to all brokers
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: "{{ hostvars[ansible_play_hosts[0]].kafka_cluster_id_generated.stdout | trim }}"
+  when:
+    - kafka_cluster_id_effective | length == 0
+    - hostvars[ansible_play_hosts[0]].kafka_cluster_id_generated is defined
+    - (hostvars[ansible_play_hosts[0]].kafka_cluster_id_generated.stdout | trim | length) > 0
+
+- name: Assert we have a usable cluster id now
+  ansible.builtin.assert:
+    that:
+      - kafka_cluster_id_effective is defined
+      - (kafka_cluster_id_effective | string | trim | length) > 10
+    fail_msg: >
+      Could not determine kafka_cluster_id_effective.
+      Provide kafka_cluster_id in inventory/group_vars/all/kafka.yml OR ensure python3 is available OR install Kafka first so kafka-storage.sh exists.
+
+# Persist it on each broker if missing
+- name: Persist cluster id to broker disk (idempotent)
+  ansible.builtin.copy:
+    dest: "{{ kafka_data_dir }}/cluster.id"
+    content: "{{ kafka_cluster_id_effective | trim }}\n"
+    owner: "{{ kafka_user | default('kafka') }}"
+    group: "{{ kafka_group | default('kafka') }}"
+    mode: "0644"
+    force: false
+  when: not kafka_cluster_id_file.stat.exists
+
+- name: Show cluster id being used (once)
+  ansible.builtin.debug:
+    msg: "Using KRaft cluster id: {{ kafka_cluster_id_effective }}"
+  run_once: true
