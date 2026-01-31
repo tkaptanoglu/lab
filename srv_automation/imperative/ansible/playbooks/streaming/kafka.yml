@@ -6,3 +6,4 @@
     - role: streaming/kafka/install
     - role: streaming/kafka/cluster_id
     - role: streaming/kafka/configure
+    - role: streaming/kafka/verify

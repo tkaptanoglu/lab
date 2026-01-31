@@ -1,0 +1,10 @@
+---
+# Verification knobs
+kafka_verify_timeout_seconds: 120
+
+# retries for protocol-level checks (broker api versions / quorum)
+kafka_verify_retries: 18
+kafka_verify_delay_seconds: 5
+
+# whether to check quorum status (recommended for KRaft)
+kafka_verify_check_quorum: true
