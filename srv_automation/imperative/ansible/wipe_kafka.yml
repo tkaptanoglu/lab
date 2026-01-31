@@ -1,0 +1,63 @@
+---
+- name: wipe kafka completely
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: stop kafka service if present
+      ansible.builtin.systemd:
+        name: kafka
+        state: stopped
+      ignore_errors: true
+
+    - name: disable kafka service if present
+      ansible.builtin.systemd:
+        name: kafka
+        enabled: false
+      ignore_errors: true
+
+    - name: remove systemd unit
+      ansible.builtin.file:
+        path: /etc/systemd/system/kafka.service
+        state: absent
+
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: remove kafka install dir
+      ansible.builtin.file:
+        path: /opt/kafka
+        state: absent
+
+    - name: remove versioned kafka dirs (if present)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/kafka_2.13-4.1.1
+      ignore_errors: true
+
+    - name: remove kafka data dir
+      ansible.builtin.file:
+        path: /var/lib/kafka
+        state: absent
+
+    - name: remove kafka log dir
+      ansible.builtin.file:
+        path: /var/log/kafka
+        state: absent
+
+    - name: remove kafka user (if present)
+      ansible.builtin.user:
+        name: kafka
+        state: absent
+        remove: true
+      ignore_errors: true
+
+    - name: remove kafka group (if present)
+      ansible.builtin.group:
+        name: kafka
+        state: absent
+      ignore_errors: true

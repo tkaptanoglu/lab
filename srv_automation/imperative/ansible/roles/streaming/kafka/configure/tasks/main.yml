@@ -1,0 +1,103 @@
+---
+# Configure Kafka KRaft: server.properties + systemd unit + format storage + start service
+# Assumes install role created kafka user/group and installed Kafka into {{ kafka_install_dir }}
+
+- name: Compute node.id for this broker (stable from play host ordering)
+  ansible.builtin.set_fact:
+    kafka_node_id: "{{ (ansible_play_hosts_all | list).index(inventory_hostname) + 1 }}"
+
+- name: Compute broker host address (resolvable)
+  ansible.builtin.set_fact:
+    kafka_advertise_host: "{{ ansible_host | default(inventory_hostname) }}"
+
+# Safe/portable voters builder (no extra collections needed)
+- name: Build controller.quorum.voters string
+  ansible.builtin.set_fact:
+    kafka_controller_quorum_voters_str: >-
+      {%- set out = [] -%}
+      {%- for h in (ansible_play_hosts_all | list) -%}
+      {%- set nid = (ansible_play_hosts_all | list).index(h) + 1 -%}
+      {%- set host = (hostvars[h].ansible_host | default(h)) -%}
+      {%- set _ = out.append(nid ~ '@' ~ host ~ ':' ~ (kafka_controller_port | int)) -%}
+      {%- endfor -%}
+      {{ out | join(',') }}
+
+- name: Ensure Kraft config directory exists
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}/config/kraft"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0755"
+
+- name: Render server.properties
+  ansible.builtin.template:
+    src: server.properties.j2
+    dest: "{{ kafka_install_dir }}/config/kraft/server.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0644"
+  notify: Restart Kafka
+
+# --- systemd hygiene: remove conflicts, then install ONE unit ---
+
+- name: Stop Kafka if it exists (ignore if not installed yet)
+  ansible.builtin.systemd:
+    name: kafka
+    state: stopped
+  failed_when: false
+
+- name: Remove any old/conflicting kafka unit files (common cause of EBUSY/load failures)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/kafka.service
+    - /lib/systemd/system/kafka.service
+    - /usr/lib/systemd/system/kafka.service
+  notify: Daemon reload systemd
+
+- name: Remove any old drop-in directory (can contain broken overrides)
+  ansible.builtin.file:
+    path: /etc/systemd/system/kafka.service.d
+    state: absent
+  notify: Daemon reload systemd
+
+- name: Render systemd unit (canonical location)
+  ansible.builtin.template:
+    src: kafka.service.j2
+    dest: /etc/systemd/system/kafka.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Daemon reload systemd
+    - Restart Kafka
+
+- name: Force systemd daemon-reload now
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# --- format storage (idempotent) ---
+
+- name: Check if storage already formatted
+  ansible.builtin.stat:
+    path: "{{ kafka_data_dir }}/meta.properties"
+  register: kafka_meta_props
+
+- name: Format Kafka storage (KRaft) once
+  ansible.builtin.command: >-
+    {{ kafka_install_dir }}/bin/kafka-storage.sh format
+    -t {{ kafka_cluster_id_effective }}
+    -c {{ kafka_install_dir }}/config/kraft/server.properties
+  become: true
+  become_user: "{{ kafka_user }}"
+  environment:
+    ANSIBLE_REMOTE_TEMP: "/tmp/.ansible-{{ kafka_user }}"
+  when: not kafka_meta_props.stat.exists
+
+- name: Enable and start Kafka
+  ansible.builtin.systemd:
+    name: kafka
+    enabled: true
+    state: started

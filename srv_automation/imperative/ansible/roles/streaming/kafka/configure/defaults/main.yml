@@ -1,0 +1,9 @@
+---
+kafka_client_port: 9092
+kafka_controller_port: 9093
+
+# For single node, 1 is OK. For 3-node prod clusters, set these to 3 and 2.
+kafka_internal_replication_factor: 3
+kafka_internal_min_isr: 2
+
+kafka_manage_ufw: false

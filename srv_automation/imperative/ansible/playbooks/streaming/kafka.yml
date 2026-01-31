@@ -3,5 +3,6 @@
   hosts: all
   become: true
   roles:
-    - role: streaming/kafka_cluster_id
-    - role: streaming/kafka_install
+    - role: streaming/kafka/install
+    - role: streaming/kafka/cluster_id
+    - role: streaming/kafka/configure

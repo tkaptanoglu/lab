@@ -1,0 +1,90 @@
+---
+# Produces kafka_cluster_id_effective and persists it at:
+#   {{ kafka_data_dir }}/cluster.id
+#
+# Priority:
+# 1) existing broker file cluster.id (if present and non-placeholder)
+# 2) generate once on first broker, distribute, persist
+
+- name: Check whether kafka user exists yet
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ kafka_user | default('kafka') }}"
+  register: kafka_user_getent
+  failed_when: false
+  changed_when: false
+
+- name: Check whether kafka group exists yet
+  ansible.builtin.getent:
+    database: group
+    key: "{{ kafka_group | default('kafka') }}"
+  register: kafka_group_getent
+  failed_when: false
+  changed_when: false
+
+- name: Set kafka_user_exists / kafka_group_exists
+  ansible.builtin.set_fact:
+    kafka_user_exists: "{{ (kafka_user_getent.ansible_facts.getent_passwd | default({})) | length > 0 }}"
+    kafka_group_exists: "{{ (kafka_group_getent.ansible_facts.getent_group | default({})) | length > 0 }}"
+
+- name: Ensure kafka_data_dir exists
+  ansible.builtin.file:
+    path: "{{ kafka_data_dir }}"
+    state: directory
+    owner: "{{ kafka_user_exists | ternary((kafka_user | default('kafka')), 'root') }}"
+    group: "{{ kafka_group_exists | ternary((kafka_group | default('kafka')), 'root') }}"
+    mode: "0755"
+
+- name: Initialize kafka_cluster_id_effective to empty
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: ""
+
+- name: Check for persisted cluster.id file
+  ansible.builtin.stat:
+    path: "{{ kafka_data_dir }}/cluster.id"
+  register: kafka_cluster_id_file
+
+- name: Read broker cluster.id
+  ansible.builtin.slurp:
+    path: "{{ kafka_data_dir }}/cluster.id"
+  register: kafka_cluster_id_slurp
+  when: kafka_cluster_id_file.stat.exists
+
+- name: Use broker cluster.id if valid
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: "{{ kafka_cluster_id_slurp.content | b64decode | trim }}"
+  when:
+    - kafka_cluster_id_file.stat.exists
+    - kafka_cluster_id_slurp.content is defined
+    - (kafka_cluster_id_slurp.content | b64decode | trim | length) > 10
+    - (kafka_cluster_id_slurp.content | b64decode | trim) not in ['REPLACE_ME_WITH_A_REAL_UUID', 'CHANGE_ME', 'placeholder', 'PLACEHOLDER', '']
+
+- name: Generate cluster id once on first broker (python uuid)
+  ansible.builtin.command: python3 -c "import uuid; print(uuid.uuid4())"
+  register: kafka_cluster_id_generated
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ ansible_play_hosts[0] }}"
+  when: kafka_cluster_id_effective | length == 0
+
+- name: Broadcast generated cluster id to all brokers
+  ansible.builtin.set_fact:
+    kafka_cluster_id_effective: "{{ hostvars[ansible_play_hosts[0]].kafka_cluster_id_generated.stdout | default('') | trim }}"
+  when:
+    - kafka_cluster_id_effective | length == 0
+    - (hostvars[ansible_play_hosts[0]].kafka_cluster_id_generated.stdout | default('') | trim | length) > 10
+
+- name: Assert final cluster id is valid
+  ansible.builtin.assert:
+    that:
+      - (kafka_cluster_id_effective | string | trim | length) > 10
+      - (kafka_cluster_id_effective | string | trim) not in ['REPLACE_ME_WITH_A_REAL_UUID', 'CHANGE_ME', 'placeholder', 'PLACEHOLDER', '']
+    fail_msg: "kafka_cluster_id_effective is invalid."
+
+- name: Persist cluster id to broker disk
+  ansible.builtin.copy:
+    dest: "{{ kafka_data_dir }}/cluster.id"
+    content: "{{ kafka_cluster_id_effective | trim }}\n"
+    owner: "{{ kafka_user_exists | ternary((kafka_user | default('kafka')), 'root') }}"
+    group: "{{ kafka_group_exists | ternary((kafka_group | default('kafka')), 'root') }}"
+    mode: "0644"

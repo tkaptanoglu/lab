@@ -1,21 +1,25 @@
 [Unit]
 Description=Apache Kafka (KRaft)
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 User={{ kafka_user }}
 Group={{ kafka_group }}
+WorkingDirectory={{ kafka_install_dir }}
+
+# Keep paths unambiguous: always use the symlinked install dir
 ExecStart={{ kafka_install_dir }}/bin/kafka-server-start.sh {{ kafka_install_dir }}/config/kraft/server.properties
 ExecStop={{ kafka_install_dir }}/bin/kafka-server-stop.sh
+
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=100000
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-ReadWritePaths={{ kafka_data_dir }} {{ kafka_log_dir }} {{ kafka_install_dir }}
+
+# Logs go to journald unless you redirect inside Kafka config
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
