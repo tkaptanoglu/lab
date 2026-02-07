@@ -1,0 +1,23 @@
+---
+# GitHub API endpoint for latest stable net-kourier release
+knative_net_kourier_github_latest_api: "https://api.github.com/repos/knative-extensions/net-kourier/releases/latest"
+
+# Where to stage the manifest on the target host
+knative_net_kourier_manifest_path: "/tmp/knative-net-kourier.yaml"
+
+# Kubeconfig path on a kubeadm control-plane node
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+# Namespaces used by Kourier (default layout)
+knative_serving_namespace: "knative-serving"
+kourier_gateway_namespace: "kourier-system"
+
+# Kourier resources to verify
+kourier_controller_deployment_name: "net-kourier-controller"
+kourier_gateway_deployment_name: "3scale-kourier-gateway"
+kourier_external_service_name: "kourier"
+
+# Wait tuning
+knative_net_kourier_verify_retries: 60
+knative_net_kourier_verify_delay: 3
+

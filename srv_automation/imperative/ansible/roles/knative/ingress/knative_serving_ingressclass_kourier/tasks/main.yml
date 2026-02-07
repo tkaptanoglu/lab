@@ -1,0 +1,97 @@
+---
+- name: "Knative Serving ingress class (Kourier) | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Read Knative Serving config-network ConfigMap"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: "{{ knative_serving_namespace }}"
+        name: "config-network"
+      register: _config_network
+      changed_when: false
+
+    - name: "Extract current ingress-class from config-network (if present)"
+      ansible.builtin.set_fact:
+        knative_serving_current_ingress_class: >-
+          {{
+            (_config_network.resources[0].data['ingress-class'])
+            if (
+              _config_network.resources is defined and
+              (_config_network.resources | length) > 0 and
+              _config_network.resources[0].data is defined and
+              ('ingress-class' in _config_network.resources[0].data)
+            )
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to patch config-network"
+      ansible.builtin.set_fact:
+        knative_serving_ingresscfg_action: >-
+          {{
+            'patch'
+            if (knative_serving_current_ingress_class != knative_serving_ingress_class_kourier)
+            else
+            'skip'
+          }}
+      changed_when: false
+
+    - name: "Show ingress-class decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_serving_ingresscfg_action }}"
+          current_ingress_class: "{{ knative_serving_current_ingress_class }}"
+          desired_ingress_class: "{{ knative_serving_ingress_class_kourier }}"
+          kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+      changed_when: false
+
+    - name: "Patch config-network to use Kourier ingress-class (only if needed)"
+      kubernetes.core.k8s:
+        state: present
+        merge_type:
+          - merge
+        resource_definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: config-network
+            namespace: "{{ knative_serving_namespace }}"
+          data:
+            ingress-class: "{{ knative_serving_ingress_class_kourier }}"
+      when: knative_serving_ingresscfg_action == 'patch'
+
+    # -------------------------
+    # Verification (runs always)
+    # -------------------------
+
+    - name: "Re-read config-network ConfigMap after patch/skip"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: "{{ knative_serving_namespace }}"
+        name: "config-network"
+      register: _config_network_post
+      until: "_config_network_post.resources | length > 0"
+      retries: "{{ knative_serving_ingresscfg_verify_retries }}"
+      delay: "{{ knative_serving_ingresscfg_verify_delay }}"
+      changed_when: false
+
+    - name: "Assert config-network ingress-class is set to Kourier"
+      ansible.builtin.assert:
+        that:
+          - "_config_network_post.resources[0].data is defined"
+          - "'ingress-class' in _config_network_post.resources[0].data"
+          - "_config_network_post.resources[0].data['ingress-class'] == knative_serving_ingress_class_kourier"
+        fail_msg: >-
+          Knative Serving config-network ingress-class is not set as expected.
+          Desired={{ knative_serving_ingress_class_kourier }},
+          Found={{ _config_network_post.resources[0].data['ingress-class'] | default('missing') }}.
+        success_msg: >-
+          Knative Serving config-network ingress-class is correctly set to {{ knative_serving_ingress_class_kourier }}.
+

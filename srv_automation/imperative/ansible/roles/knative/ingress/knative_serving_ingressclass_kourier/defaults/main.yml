@@ -1,0 +1,14 @@
+---
+# Kubeconfig path on a kubeadm control-plane node
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+# Knative Serving namespace
+knative_serving_namespace: "knative-serving"
+
+# Target ingress class for Kourier
+knative_serving_ingress_class_kourier: "kourier.ingress.networking.knative.dev"
+
+# Wait tuning (for configmap availability)
+knative_serving_ingresscfg_verify_retries: 30
+knative_serving_ingresscfg_verify_delay: 2
+

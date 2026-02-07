@@ -7,3 +7,5 @@
   roles:
     - role: roles/knative/core/knative_serving_crds
     - role: roles/knative/core/knative_serving_core
+    - role: roles/knative/ingress/knative_net_kourier
+    - role: roles/knative/ingress/knative_serving_ingressclass_kourier

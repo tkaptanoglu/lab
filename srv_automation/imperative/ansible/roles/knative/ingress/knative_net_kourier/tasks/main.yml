@@ -1,0 +1,165 @@
+---
+- name: "Knative net-kourier | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable net-kourier release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_net_kourier_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _net_kourier_release
+      changed_when: false
+
+    - name: "Set desired net-kourier tag/version and manifest URL"
+      ansible.builtin.set_fact:
+        knative_net_kourier_desired_tag: "{{ _net_kourier_release.json.tag_name }}"
+        # Normalize to match typical app.kubernetes.io/version labels (no leading 'v')
+        knative_net_kourier_desired_version: >-
+          {{
+            (_net_kourier_release.json.tag_name
+              | regex_replace('^knative-', '')
+              | regex_replace('^v', '')
+            )
+          }}
+        knative_net_kourier_manifest_url: >-
+          https://github.com/knative-extensions/net-kourier/releases/download/{{ _net_kourier_release.json.tag_name }}/kourier.yaml
+      changed_when: false
+
+    - name: "Check if net-kourier controller Deployment exists"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_serving_namespace }}"
+        name: "{{ kourier_controller_deployment_name }}"
+      register: _kourier_controller_dep
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract installed net-kourier version from controller deployment label (if present)"
+      ansible.builtin.set_fact:
+        knative_net_kourier_installed_version_raw: >-
+          {{
+            (_kourier_controller_dep.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (
+              _kourier_controller_dep is defined and
+              _kourier_controller_dep.resources is defined and
+              (_kourier_controller_dep.resources | length) > 0 and
+              _kourier_controller_dep.resources[0].metadata.labels is defined and
+              ('app.kubernetes.io/version' in _kourier_controller_dep.resources[0].metadata.labels)
+            )
+            else ''
+          }}
+        knative_net_kourier_installed_version: >-
+          {{
+            (
+              (_kourier_controller_dep.resources[0].metadata.labels['app.kubernetes.io/version'])
+              if (
+                _kourier_controller_dep is defined and
+                _kourier_controller_dep.resources is defined and
+                (_kourier_controller_dep.resources | length) > 0 and
+                _kourier_controller_dep.resources[0].metadata.labels is defined and
+                ('app.kubernetes.io/version' in _kourier_controller_dep.resources[0].metadata.labels)
+              )
+              else ''
+            ) | regex_replace('^v', '')
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade net-kourier"
+      ansible.builtin.set_fact:
+        knative_net_kourier_action: >-
+          {{
+            'install'
+            if (knative_net_kourier_installed_version | length == 0)
+            else
+            (
+              'upgrade'
+              if (knative_net_kourier_installed_version != knative_net_kourier_desired_version)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show net-kourier decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_net_kourier_action }}"
+          desired_tag: "{{ knative_net_kourier_desired_tag }}"
+          desired_version: "{{ knative_net_kourier_desired_version }}"
+          installed_version_raw: "{{ knative_net_kourier_installed_version_raw | default('') }}"
+          installed_version: "{{ knative_net_kourier_installed_version | default('') }}"
+          kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+      changed_when: false
+
+    - name: "Download kourier.yaml for desired version (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_net_kourier_manifest_url }}"
+        dest: "{{ knative_net_kourier_manifest_path }}"
+        mode: "0644"
+      when: knative_net_kourier_action in ['install', 'upgrade']
+
+    - name: "Apply net-kourier (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_net_kourier_manifest_path }}"
+      when: knative_net_kourier_action in ['install', 'upgrade']
+
+    # -------------------------
+    # Verification (runs always)
+    # -------------------------
+
+    - name: "Wait for net-kourier controller deployment to be Available"
+      ansible.builtin.include_tasks: verify_one_deployment.yml
+      vars:
+        verify_namespace: "{{ knative_serving_namespace }}"
+        verify_deployment_name: "{{ kourier_controller_deployment_name }}"
+
+    - name: "Wait for kourier gateway deployment to be Available"
+      ansible.builtin.include_tasks: verify_one_deployment.yml
+      vars:
+        verify_namespace: "{{ kourier_gateway_namespace }}"
+        verify_deployment_name: "{{ kourier_gateway_deployment_name }}"
+
+    - name: "Verify kourier external Service exists"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        namespace: "{{ kourier_gateway_namespace }}"
+        name: "{{ kourier_external_service_name }}"
+      register: _kourier_svc
+      until: "_kourier_svc.resources | length > 0"
+      retries: "{{ knative_net_kourier_verify_retries }}"
+      delay: "{{ knative_net_kourier_verify_delay }}"
+      changed_when: false
+
+    - name: "Re-check installed net-kourier version after verification"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_serving_namespace }}"
+        name: "{{ kourier_controller_deployment_name }}"
+      register: _kourier_controller_dep_post
+      changed_when: false
+
+    - name: "Assert net-kourier is at desired version"
+      ansible.builtin.assert:
+        that:
+          - "_kourier_controller_dep_post.resources | length > 0"
+          - "_kourier_controller_dep_post.resources[0].metadata.labels is defined"
+          - "'app.kubernetes.io/version' in _kourier_controller_dep_post.resources[0].metadata.labels"
+          - "(_kourier_controller_dep_post.resources[0].metadata.labels['app.kubernetes.io/version'] | regex_replace('^v','')) == knative_net_kourier_desired_version"
+        fail_msg: >-
+          net-kourier appears installed and ready, but version label does not match desired.
+          Desired={{ knative_net_kourier_desired_version }},
+          Found={{ _kourier_controller_dep_post.resources[0].metadata.labels['app.kubernetes.io/version'] | default('missing') }}.
+        success_msg: >-
+          net-kourier is installed, ready, and at the latest stable version ({{ knative_net_kourier_desired_version }}).
+
