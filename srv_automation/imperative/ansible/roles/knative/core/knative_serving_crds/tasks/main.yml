@@ -1,0 +1,155 @@
+---
+# Ensure every kubernetes.core module call in this role uses the kubeadm kubeconfig.
+# This also applies to included task files (verify_one_crd.yml).
+- name: "Knative Serving CRDs | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable Knative Serving release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_serving_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _kn_serving_release
+      changed_when: false
+
+    - name: "Set desired Knative Serving tag/version and CRDs manifest URL"
+      ansible.builtin.set_fact:
+        knative_serving_desired_tag: "{{ _kn_serving_release.json.tag_name }}"
+        # Keep a normalized comparison version: strip leading 'knative-' and leading 'v'
+        knative_serving_desired_version: >-
+          {{
+            (_kn_serving_release.json.tag_name
+              | regex_replace('^knative-', '')
+              | regex_replace('^v', '')
+            )
+          }}
+        knative_serving_crds_manifest_url: >-
+          https://github.com/knative/serving/releases/download/{{ _kn_serving_release.json.tag_name }}/serving-crds.yaml
+      changed_when: false
+
+    - name: "Check if a representative Knative Serving CRD exists (services.serving.knative.dev)"
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: "services.serving.knative.dev"
+      register: _kn_serving_services_crd
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract installed CRDs version (from CRD label) if present"
+      ansible.builtin.set_fact:
+        knative_serving_installed_version: >-
+          {{
+            (_kn_serving_services_crd.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (_kn_serving_services_crd is defined and _kn_serving_services_crd.resources is defined and (_kn_serving_services_crd.resources | length) > 0
+                and _kn_serving_services_crd.resources[0].metadata.labels is defined
+                and ('app.kubernetes.io/version' in _kn_serving_services_crd.resources[0].metadata.labels))
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Normalize installed CRDs version for comparison"
+      ansible.builtin.set_fact:
+        knative_serving_installed_version_norm: "{{ knative_serving_installed_version | regex_replace('^v', '') }}"
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade CRDs"
+      ansible.builtin.set_fact:
+        knative_serving_crds_action: >-
+          {{
+            'install'
+            if (knative_serving_installed_version_norm | length == 0)
+            else
+            (
+              'upgrade'
+              if (knative_serving_installed_version_norm != knative_serving_desired_version)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show CRDs decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_serving_crds_action }}"
+          desired_tag: "{{ knative_serving_desired_tag }}"
+          desired_version_norm: "{{ knative_serving_desired_version }}"
+          installed_version_raw: "{{ knative_serving_installed_version | default('') }}"
+          installed_version_norm: "{{ knative_serving_installed_version_norm | default('') }}"
+          kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+      changed_when: false
+
+    - name: "Download serving-crds.yaml for desired version (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_serving_crds_manifest_url }}"
+        dest: "{{ knative_serving_crds_manifest_path }}"
+        mode: "0644"
+      when: knative_serving_crds_action in ['install', 'upgrade']
+
+    - name: "Apply Knative Serving CRDs (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_serving_crds_manifest_path }}"
+      when: knative_serving_crds_action in ['install', 'upgrade']
+
+    # --- Verification (runs always) ---
+
+    - name: "Verify required Knative Serving CRDs exist and are Established"
+      ansible.builtin.include_tasks: verify_one_crd.yml
+      loop: "{{ knative_serving_required_crds }}"
+      loop_control:
+        loop_var: crd_name
+
+    - name: "Re-check installed CRDs version after verification (label on CRD)"
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: "services.serving.knative.dev"
+      register: _kn_serving_services_crd_post
+      changed_when: false
+
+    - name: "Extract observed CRDs version after verification"
+      ansible.builtin.set_fact:
+        knative_serving_observed_version: >-
+          {{
+            (_kn_serving_services_crd_post.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (_kn_serving_services_crd_post.resources | length > 0
+                and _kn_serving_services_crd_post.resources[0].metadata.labels is defined
+                and ('app.kubernetes.io/version' in _kn_serving_services_crd_post.resources[0].metadata.labels))
+            else ''
+          }}
+        knative_serving_observed_version_norm: >-
+          {{
+            (
+              (_kn_serving_services_crd_post.resources[0].metadata.labels['app.kubernetes.io/version'])
+              if (_kn_serving_services_crd_post.resources | length > 0
+                  and _kn_serving_services_crd_post.resources[0].metadata.labels is defined
+                  and ('app.kubernetes.io/version' in _kn_serving_services_crd_post.resources[0].metadata.labels))
+              else ''
+            ) | regex_replace('^v', '')
+          }}
+      changed_when: false
+
+    - name: "Assert Knative Serving CRDs are at desired version"
+      ansible.builtin.assert:
+        that:
+          - "_kn_serving_services_crd_post.resources | length > 0"
+          - "_kn_serving_services_crd_post.resources[0].metadata.labels is defined"
+          - "'app.kubernetes.io/version' in _kn_serving_services_crd_post.resources[0].metadata.labels"
+          - "knative_serving_observed_version_norm == knative_serving_desired_version"
+        fail_msg: >-
+          Knative Serving CRDs are installed and Established, but version label does not match desired.
+          Desired(norm)={{ knative_serving_desired_version }},
+          Found(raw)={{ knative_serving_observed_version | default('missing') }},
+          Found(norm)={{ knative_serving_observed_version_norm | default('missing') }}.
+        success_msg: >-
+          Knative Serving CRDs are installed, Established, and at the latest stable version ({{ knative_serving_desired_version }}).
+

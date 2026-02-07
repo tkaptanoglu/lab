@@ -1,0 +1,22 @@
+---
+# GitHub API endpoint for latest stable (non-prerelease) release
+knative_serving_github_latest_api: "https://api.github.com/repos/knative/serving/releases/latest"
+
+# Where to stage the manifest on the target host
+knative_serving_crds_manifest_path: "/tmp/knative-serving-crds.yaml"
+
+# Kubeconfig path on a kubeadm control-plane node
+# (kubeadm default admin kubeconfig)
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+# A representative set of CRDs that should exist after applying serving-crds.yaml
+knative_serving_required_crds:
+  - "services.serving.knative.dev"
+  - "routes.serving.knative.dev"
+  - "configurations.serving.knative.dev"
+  - "revisions.serving.knative.dev"
+
+# How long to wait for CRDs to become Established
+knative_serving_crd_verify_retries: 30
+knative_serving_crd_verify_delay: 2
+

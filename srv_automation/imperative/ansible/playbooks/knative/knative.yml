@@ -1,0 +1,9 @@
+---
+- name: Install KNative
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: roles/knative/core/knative_serving_crds
+    - role: roles/knative/core/knative_serving_core

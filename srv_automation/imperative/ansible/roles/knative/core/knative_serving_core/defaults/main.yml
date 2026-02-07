@@ -1,0 +1,31 @@
+---
+# GitHub API endpoint for latest stable (non-prerelease) release
+knative_serving_github_latest_api: "https://api.github.com/repos/knative/serving/releases/latest"
+
+# Where to stage the manifest on the target host
+knative_serving_core_manifest_path: "/tmp/knative-serving-core.yaml"
+
+# Namespace used by Knative Serving core YAML install
+knative_serving_namespace: "knative-serving"
+
+# Kubeconfig path on a kubeadm control-plane node
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+# Core deployments that should exist and become Available after serving-core.yaml
+knative_serving_core_deployments:
+  - "activator"
+  - "autoscaler"
+  - "controller"
+  - "webhook"
+
+# Webhook configurations installed by serving-core.yaml that should exist
+knative_serving_required_webhooks:
+  - kind: "MutatingWebhookConfiguration"
+    name: "webhook.serving.knative.dev"
+  - kind: "ValidatingWebhookConfiguration"
+    name: "validation.webhook.serving.knative.dev"
+
+# Readiness wait tuning
+knative_serving_verify_retries: 60
+knative_serving_verify_delay: 3
+

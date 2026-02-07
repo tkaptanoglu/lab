@@ -1,0 +1,13 @@
+---
+- name: "Check {{ wh.kind }} {{ wh.name }}"
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ knative_kubeconfig_path }}"
+    api_version: admissionregistration.k8s.io/v1
+    kind: "{{ wh.kind }}"
+    name: "{{ wh.name }}"
+  register: _wh
+  until: "_wh.resources | length > 0"
+  retries: "{{ knative_serving_verify_retries }}"
+  delay: "{{ knative_serving_verify_delay }}"
+  changed_when: false
+
