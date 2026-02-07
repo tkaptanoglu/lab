@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: knative_eventing_post_install
+  description: Apply Knative Eventing post-install jobs when upgrading across minor versions and verify Jobs complete.
+  min_ansible_version: "2.14"
+  license: Apache-2.0
+  platforms:
+    - name: Ubuntu
+      versions: ["jammy"]
+dependencies: []
+

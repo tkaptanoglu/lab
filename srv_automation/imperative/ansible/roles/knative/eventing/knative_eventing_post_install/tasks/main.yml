@@ -1,0 +1,142 @@
+---
+- name: "Knative Eventing post-install | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable Knative Eventing release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_eventing_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _kn_eventing_release
+      changed_when: false
+
+    - name: "Set desired Knative Eventing tag/version and post-install manifest URL"
+      ansible.builtin.set_fact:
+        knative_eventing_desired_tag: "{{ _kn_eventing_release.json.tag_name }}"
+        knative_eventing_desired_version: "{{ _kn_eventing_release.json.tag_name | regex_replace('^knative-', '') }}"
+        knative_eventing_post_install_manifest_url: >-
+          https://github.com/knative/eventing/releases/download/{{ _kn_eventing_release.json.tag_name }}/eventing-post-install.yaml
+      changed_when: false
+
+    - name: "Read knative-eventing namespace (to detect installed version)"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_namespace }}"
+      register: _kn_eventing_ns
+      changed_when: false
+
+    - name: "Extract installed Eventing version from namespace label (if present)"
+      ansible.builtin.set_fact:
+        knative_eventing_installed_version: >-
+          {{
+            (_kn_eventing_ns.resources[0].metadata.labels[knative_eventing_version_label_key])
+            if (
+              _kn_eventing_ns.resources is defined and (_kn_eventing_ns.resources | length) > 0 and
+              _kn_eventing_ns.resources[0].metadata.labels is defined and
+              (knative_eventing_version_label_key in _kn_eventing_ns.resources[0].metadata.labels)
+            )
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Normalize installed/desired versions (strip leading 'v')"
+      ansible.builtin.set_fact:
+        knative_eventing_installed_norm: "{{ knative_eventing_installed_version | regex_replace('^v','') }}"
+        knative_eventing_desired_norm: "{{ knative_eventing_desired_version | regex_replace('^v','') }}"
+      changed_when: false
+
+    - name: "Compute installed/desired major.minor safely (split-based, no regex groups)"
+      ansible.builtin.set_fact:
+        knative_eventing_installed_major_minor: >-
+          {{
+            (knative_eventing_installed_norm.split('.')[0] ~ '.' ~ knative_eventing_installed_norm.split('.')[1])
+            if (knative_eventing_installed_norm | length > 0 and (knative_eventing_installed_norm.split('.') | length) >= 2)
+            else ''
+          }}
+        knative_eventing_desired_major_minor: >-
+          {{
+            (knative_eventing_desired_norm.split('.')[0] ~ '.' ~ knative_eventing_desired_norm.split('.')[1])
+            if ((knative_eventing_desired_norm.split('.') | length) >= 2)
+            else knative_eventing_desired_norm
+          }}
+      changed_when: false
+
+    - name: "Decide whether to run post-install jobs"
+      ansible.builtin.set_fact:
+        knative_eventing_post_install_action: >-
+          {{
+            'skip'
+            if (knative_eventing_installed_norm | length == 0)
+            else
+            (
+              'run'
+              if (knative_eventing_installed_major_minor != knative_eventing_desired_major_minor)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show post-install decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_post_install_action }}"
+          installed_version: "{{ knative_eventing_installed_version | default('') }}"
+          desired_version: "{{ knative_eventing_desired_version }}"
+          installed_major_minor: "{{ knative_eventing_installed_major_minor | default('') }}"
+          desired_major_minor: "{{ knative_eventing_desired_major_minor }}"
+      changed_when: false
+
+    - name: "Download eventing-post-install.yaml (only if action=run)"
+      ansible.builtin.get_url:
+        url: "{{ knative_eventing_post_install_manifest_url }}"
+        dest: "{{ knative_eventing_post_install_manifest_path }}"
+        mode: "0644"
+      when: knative_eventing_post_install_action == 'run'
+
+    - name: "Apply Knative Eventing post-install jobs (only if action=run)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_eventing_post_install_manifest_path }}"
+      when: knative_eventing_post_install_action == 'run'
+
+    # --- Verification (runs always) ---
+    # If action=skip: we only ensure namespace exists.
+    # If action=run: we wait for the knative-eventing jobs (part-of=knative-eventing) to complete.
+
+    - name: "Verify knative-eventing namespace exists"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_namespace }}"
+      register: _kn_eventing_ns_post
+      until: "_kn_eventing_ns_post.resources | length > 0"
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: "List knative-eventing Jobs created for Eventing (post-install verification)"
+      kubernetes.core.k8s_info:
+        api_version: batch/v1
+        kind: Job
+        namespace: "{{ knative_eventing_namespace }}"
+        label_selectors:
+          - "app.kubernetes.io/part-of=knative-eventing"
+      register: _eventing_jobs
+      changed_when: false
+
+    - name: "Wait for post-install jobs to complete successfully (only if action=run)"
+      ansible.builtin.include_tasks: verify_one_job.yml
+      when: knative_eventing_post_install_action == 'run'
+      loop: "{{ _eventing_jobs.resources | default([]) }}"
+      loop_control:
+        loop_var: job_obj
+

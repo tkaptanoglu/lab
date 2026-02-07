@@ -1,0 +1,122 @@
+---
+- name: "Knative Eventing MT Channel Broker | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable Knative Eventing release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_eventing_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _kn_eventing_release
+      changed_when: false
+
+    - name: "Set desired Knative Eventing tag/version and mt-channel-broker manifest URL"
+      ansible.builtin.set_fact:
+        knative_eventing_desired_tag: "{{ _kn_eventing_release.json.tag_name }}"
+        knative_eventing_desired_version: "{{ _kn_eventing_release.json.tag_name | regex_replace('^knative-', '') }}"
+        knative_eventing_mtcb_manifest_url: >-
+          https://github.com/knative/eventing/releases/download/{{ _kn_eventing_release.json.tag_name }}/mt-channel-broker.yaml
+      changed_when: false
+
+    - name: "Check if mt-broker-controller Deployment exists"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_eventing_namespace }}"
+        name: "mt-broker-controller"
+      register: _mtbc_controller_dep
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract installed MT Channel Broker version from mt-broker-controller label (if present)"
+      ansible.builtin.set_fact:
+        knative_eventing_mtcb_installed_version: >-
+          {{
+            (_mtbc_controller_dep.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (
+              _mtbc_controller_dep is defined and
+              _mtbc_controller_dep.resources is defined and
+              (_mtbc_controller_dep.resources | length) > 0 and
+              _mtbc_controller_dep.resources[0].metadata.labels is defined and
+              ('app.kubernetes.io/version' in _mtbc_controller_dep.resources[0].metadata.labels)
+            )
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade MT Channel Broker"
+      ansible.builtin.set_fact:
+        knative_eventing_mtcb_action: >-
+          {{
+            'install'
+            if (knative_eventing_mtcb_installed_version | length == 0)
+            else
+            (
+              'upgrade'
+              if (knative_eventing_mtcb_installed_version != knative_eventing_desired_version)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show MT Channel Broker decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_mtcb_action }}"
+          desired_tag: "{{ knative_eventing_desired_tag }}"
+          desired_version: "{{ knative_eventing_desired_version }}"
+          installed_version: "{{ knative_eventing_mtcb_installed_version | default('') }}"
+      changed_when: false
+
+    - name: "Download mt-channel-broker.yaml (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_eventing_mtcb_manifest_url }}"
+        dest: "{{ knative_eventing_mtcb_manifest_path }}"
+        mode: "0644"
+      when: knative_eventing_mtcb_action in ['install', 'upgrade']
+
+    - name: "Apply MT Channel Broker (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_eventing_mtcb_manifest_path }}"
+      when: knative_eventing_mtcb_action in ['install', 'upgrade']
+
+    # --- Verification (runs always) ---
+
+    - name: "Wait for MT Channel Broker deployments to be Available"
+      ansible.builtin.include_tasks: verify_one_deployment.yml
+      loop: "{{ knative_eventing_mtcb_deployments }}"
+      loop_control:
+        loop_var: dep_name
+
+    - name: "Re-check installed MT Channel Broker version after verification"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_eventing_namespace }}"
+        name: "mt-broker-controller"
+      register: _mtbc_controller_dep_post
+      changed_when: false
+
+    - name: "Assert MT Channel Broker is at desired version"
+      ansible.builtin.assert:
+        that:
+          - "_mtbc_controller_dep_post.resources | length > 0"
+          - "_mtbc_controller_dep_post.resources[0].metadata.labels is defined"
+          - "'app.kubernetes.io/version' in _mtbc_controller_dep_post.resources[0].metadata.labels"
+          - "(_mtbc_controller_dep_post.resources[0].metadata.labels['app.kubernetes.io/version'] | regex_replace('^v','')) == (knative_eventing_desired_version | regex_replace('^v',''))"
+        fail_msg: >-
+          MT Channel Broker appears installed and ready, but version label does not match desired.
+          Desired={{ knative_eventing_desired_version }},
+          Found={{ _mtbc_controller_dep_post.resources[0].metadata.labels['app.kubernetes.io/version'] | default('missing') }}.
+        success_msg: >-
+          MT Channel Broker is installed, ready, and at the latest stable version ({{ knative_eventing_desired_version }}).
+

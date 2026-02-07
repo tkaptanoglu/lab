@@ -1,0 +1,122 @@
+---
+- name: "Knative Eventing In-Memory Channel | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable Knative Eventing release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_eventing_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _kn_eventing_release
+      changed_when: false
+
+    - name: "Set desired Knative Eventing tag/version and in-memory-channel manifest URL"
+      ansible.builtin.set_fact:
+        knative_eventing_desired_tag: "{{ _kn_eventing_release.json.tag_name }}"
+        knative_eventing_desired_version: "{{ _kn_eventing_release.json.tag_name | regex_replace('^knative-', '') }}"
+        knative_eventing_imc_manifest_url: >-
+          https://github.com/knative/eventing/releases/download/{{ _kn_eventing_release.json.tag_name }}/in-memory-channel.yaml
+      changed_when: false
+
+    - name: "Check if imc-controller Deployment exists"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_eventing_namespace }}"
+        name: "imc-controller"
+      register: _imc_controller_dep
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract installed IMC version from imc-controller label (if present)"
+      ansible.builtin.set_fact:
+        knative_eventing_imc_installed_version: >-
+          {{
+            (_imc_controller_dep.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (
+              _imc_controller_dep is defined and
+              _imc_controller_dep.resources is defined and
+              (_imc_controller_dep.resources | length) > 0 and
+              _imc_controller_dep.resources[0].metadata.labels is defined and
+              ('app.kubernetes.io/version' in _imc_controller_dep.resources[0].metadata.labels)
+            )
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade In-Memory Channel"
+      ansible.builtin.set_fact:
+        knative_eventing_imc_action: >-
+          {{
+            'install'
+            if (knative_eventing_imc_installed_version | length == 0)
+            else
+            (
+              'upgrade'
+              if (knative_eventing_imc_installed_version != knative_eventing_desired_version)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show In-Memory Channel decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_imc_action }}"
+          desired_tag: "{{ knative_eventing_desired_tag }}"
+          desired_version: "{{ knative_eventing_desired_version }}"
+          installed_version: "{{ knative_eventing_imc_installed_version | default('') }}"
+      changed_when: false
+
+    - name: "Download in-memory-channel.yaml (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_eventing_imc_manifest_url }}"
+        dest: "{{ knative_eventing_imc_manifest_path }}"
+        mode: "0644"
+      when: knative_eventing_imc_action in ['install', 'upgrade']
+
+    - name: "Apply In-Memory Channel (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_eventing_imc_manifest_path }}"
+      when: knative_eventing_imc_action in ['install', 'upgrade']
+
+    # --- Verification (runs always) ---
+
+    - name: "Wait for In-Memory Channel deployments to be Available"
+      ansible.builtin.include_tasks: verify_one_deployment.yml
+      loop: "{{ knative_eventing_imc_deployments }}"
+      loop_control:
+        loop_var: dep_name
+
+    - name: "Re-check installed IMC version from imc-controller after verification"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_eventing_namespace }}"
+        name: "imc-controller"
+      register: _imc_controller_dep_post
+      changed_when: false
+
+    - name: "Assert In-Memory Channel is at desired version"
+      ansible.builtin.assert:
+        that:
+          - "_imc_controller_dep_post.resources | length > 0"
+          - "_imc_controller_dep_post.resources[0].metadata.labels is defined"
+          - "'app.kubernetes.io/version' in _imc_controller_dep_post.resources[0].metadata.labels"
+          - "(_imc_controller_dep_post.resources[0].metadata.labels['app.kubernetes.io/version'] | regex_replace('^v','')) == (knative_eventing_desired_version | regex_replace('^v',''))"
+        fail_msg: >-
+          In-Memory Channel appears installed and ready, but version label does not match desired.
+          Desired={{ knative_eventing_desired_version }},
+          Found={{ _imc_controller_dep_post.resources[0].metadata.labels['app.kubernetes.io/version'] | default('missing') }}.
+        success_msg: >-
+          In-Memory Channel is installed, ready, and at the latest stable version ({{ knative_eventing_desired_version }}).
+

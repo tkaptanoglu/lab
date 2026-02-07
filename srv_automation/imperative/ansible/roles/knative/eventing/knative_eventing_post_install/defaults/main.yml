@@ -1,0 +1,15 @@
+---
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+knative_eventing_github_latest_api: "https://api.github.com/repos/knative/eventing/releases/latest"
+knative_eventing_post_install_manifest_path: "/tmp/knative-eventing-post-install.yaml"
+
+knative_eventing_namespace: "knative-eventing"
+
+# How we find the installed version (namespace label)
+knative_eventing_version_label_key: "app.kubernetes.io/version"
+
+# Job verification tuning
+knative_eventing_post_install_job_retries: 90
+knative_eventing_post_install_job_delay: 4
+

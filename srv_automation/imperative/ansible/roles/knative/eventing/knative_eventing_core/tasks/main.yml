@@ -1,0 +1,159 @@
+---
+- name: "Knative Eventing Core | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable Knative Eventing release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_eventing_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _kn_eventing_release
+      changed_when: false
+
+    - name: "Set desired Knative Eventing tag/version and core manifest URL"
+      ansible.builtin.set_fact:
+        knative_eventing_desired_tag: "{{ _kn_eventing_release.json.tag_name }}"
+        knative_eventing_desired_version: "{{ _kn_eventing_release.json.tag_name | regex_replace('^knative-', '') }}"
+        knative_eventing_core_manifest_url: >-
+          https://github.com/knative/eventing/releases/download/{{ _kn_eventing_release.json.tag_name }}/eventing-core.yaml
+      changed_when: false
+
+    - name: "Check if knative-eventing namespace exists"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_namespace }}"
+      register: _kn_eventing_ns
+      changed_when: false
+
+    - name: "Extract installed Eventing version from knative-eventing namespace label (if present)"
+      ansible.builtin.set_fact:
+        knative_eventing_installed_version: >-
+          {{
+            (_kn_eventing_ns.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (
+              _kn_eventing_ns.resources is defined and (_kn_eventing_ns.resources | length) > 0 and
+              _kn_eventing_ns.resources[0].metadata.labels is defined and
+              ('app.kubernetes.io/version' in _kn_eventing_ns.resources[0].metadata.labels)
+            )
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade Eventing core"
+      ansible.builtin.set_fact:
+        knative_eventing_core_action: >-
+          {{
+            'install'
+            if (knative_eventing_installed_version | length == 0)
+            else
+            (
+              'upgrade'
+              if (knative_eventing_installed_version != knative_eventing_desired_version)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show Eventing core decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_core_action }}"
+          desired_tag: "{{ knative_eventing_desired_tag }}"
+          desired_version: "{{ knative_eventing_desired_version }}"
+          installed_version: "{{ knative_eventing_installed_version | default('') }}"
+          kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+      changed_when: false
+
+    - name: "Download eventing-core.yaml (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_eventing_core_manifest_url }}"
+        dest: "{{ knative_eventing_core_manifest_path }}"
+        mode: "0644"
+      when: knative_eventing_core_action in ['install', 'upgrade']
+
+    - name: "Apply Knative Eventing core (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_eventing_core_manifest_path }}"
+      when: knative_eventing_core_action in ['install', 'upgrade']
+
+    # --- Verification (runs always) ---
+
+    - name: "Verify knative-eventing namespace exists (post-install / post-skip)"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_namespace }}"
+      register: _kn_eventing_ns_post
+      until: "_kn_eventing_ns_post.resources | length > 0"
+      retries: "{{ knative_eventing_verify_retries }}"
+      delay: "{{ knative_eventing_verify_delay }}"
+      changed_when: false
+
+    - name: "Wait for Eventing core deployments to be Available"
+      ansible.builtin.include_tasks: verify_one_deployment.yml
+      loop: "{{ knative_eventing_core_deployments }}"
+      loop_control:
+        loop_var: dep_name
+
+    - name: "Re-check installed version from knative-eventing namespace label"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_namespace }}"
+      register: _kn_eventing_ns_version_post
+      changed_when: false
+
+    - name: "Fallback: get installed version from eventing-controller deployment label (if namespace label missing)"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_eventing_namespace }}"
+        name: "eventing-controller"
+      register: _eventing_controller_dep
+      changed_when: false
+
+    - name: "Compute observed installed version (namespace label preferred, else controller label)"
+      ansible.builtin.set_fact:
+        knative_eventing_observed_version: >-
+          {{
+            (_kn_eventing_ns_version_post.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (
+              _kn_eventing_ns_version_post.resources is defined and (_kn_eventing_ns_version_post.resources | length) > 0 and
+              _kn_eventing_ns_version_post.resources[0].metadata.labels is defined and
+              ('app.kubernetes.io/version' in _kn_eventing_ns_version_post.resources[0].metadata.labels)
+            )
+            else
+            (
+              (_eventing_controller_dep.resources[0].metadata.labels['app.kubernetes.io/version'])
+              if (
+                _eventing_controller_dep.resources is defined and (_eventing_controller_dep.resources | length) > 0 and
+                _eventing_controller_dep.resources[0].metadata.labels is defined and
+                ('app.kubernetes.io/version' in _eventing_controller_dep.resources[0].metadata.labels)
+              )
+              else ''
+            )
+          }}
+      changed_when: false
+
+    - name: "Assert Knative Eventing core is at desired version"
+      ansible.builtin.assert:
+        that:
+          - "knative_eventing_observed_version | length > 0"
+          - "(knative_eventing_observed_version | regex_replace('^v','')) == (knative_eventing_desired_version | regex_replace('^v',''))"
+        fail_msg: >-
+          Knative Eventing core components are installed and appear ready, but observed version label does not match desired.
+          Desired={{ knative_eventing_desired_version }},
+          Observed={{ knative_eventing_observed_version | default('missing') }}.
+        success_msg: >-
+          Knative Eventing core is installed, ready, and at the latest stable version ({{ knative_eventing_desired_version }}).
+

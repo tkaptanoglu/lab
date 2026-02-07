@@ -1,0 +1,26 @@
+---
+- name: "Wait for Deployment {{ dep_name }} to be Available"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ knative_eventing_namespace }}"
+    name: "{{ dep_name }}"
+  register: _dep
+  until: >-
+    (_dep.resources | length) > 0 and
+    (
+      (
+        _dep.resources[0].status.conditions | default([])
+        | selectattr('type', 'equalto', 'Available')
+        | selectattr('status', 'equalto', 'True')
+        | list
+        | length
+      ) > 0
+    ) and
+    (
+      (_dep.resources[0].status.readyReplicas | default(0)) >= 1
+    )
+  retries: "{{ knative_eventing_imc_verify_retries }}"
+  delay: "{{ knative_eventing_imc_verify_delay }}"
+  changed_when: false
+

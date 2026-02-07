@@ -1,0 +1,121 @@
+---
+- name: "Knative Eventing CRDs | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    - name: "Discover latest stable Knative Eventing release (GitHub API)"
+      ansible.builtin.uri:
+        url: "{{ knative_eventing_github_latest_api }}"
+        method: GET
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _kn_eventing_release
+      changed_when: false
+
+    - name: "Set desired Knative Eventing tag/version and CRDs manifest URL"
+      ansible.builtin.set_fact:
+        knative_eventing_desired_tag: "{{ _kn_eventing_release.json.tag_name }}"
+        knative_eventing_desired_version: "{{ _kn_eventing_release.json.tag_name | regex_replace('^knative-', '') }}"
+        knative_eventing_crds_manifest_url: >-
+          https://github.com/knative/eventing/releases/download/{{ _kn_eventing_release.json.tag_name }}/eventing-crds.yaml
+      changed_when: false
+
+    - name: "Check if a representative Eventing CRD exists (brokers.eventing.knative.dev)"
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: "brokers.eventing.knative.dev"
+      register: _eventing_brokers_crd
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract installed Eventing CRDs version (from CRD label) if present"
+      ansible.builtin.set_fact:
+        knative_eventing_installed_crds_version: >-
+          {{
+            (_eventing_brokers_crd.resources[0].metadata.labels['app.kubernetes.io/version'])
+            if (
+              _eventing_brokers_crd is defined and
+              _eventing_brokers_crd.resources is defined and
+              (_eventing_brokers_crd.resources | length) > 0 and
+              _eventing_brokers_crd.resources[0].metadata.labels is defined and
+              ('app.kubernetes.io/version' in _eventing_brokers_crd.resources[0].metadata.labels)
+            )
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade Eventing CRDs"
+      ansible.builtin.set_fact:
+        knative_eventing_crds_action: >-
+          {{
+            'install'
+            if (knative_eventing_installed_crds_version | length == 0)
+            else
+            (
+              'upgrade'
+              if (knative_eventing_installed_crds_version != knative_eventing_desired_version)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show Eventing CRDs decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_crds_action }}"
+          desired_tag: "{{ knative_eventing_desired_tag }}"
+          desired_version: "{{ knative_eventing_desired_version }}"
+          installed_version: "{{ knative_eventing_installed_crds_version | default('') }}"
+          kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+      changed_when: false
+
+    - name: "Download eventing-crds.yaml (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_eventing_crds_manifest_url }}"
+        dest: "{{ knative_eventing_crds_manifest_path }}"
+        mode: "0644"
+      when: knative_eventing_crds_action in ['install', 'upgrade']
+
+    - name: "Apply Knative Eventing CRDs (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ knative_eventing_crds_manifest_path }}"
+      when: knative_eventing_crds_action in ['install', 'upgrade']
+
+    # --- Verification (runs always) ---
+
+    - name: "Verify required Knative Eventing CRDs exist and are Established"
+      ansible.builtin.include_tasks: verify_one_crd.yml
+      loop: "{{ knative_eventing_required_crds }}"
+      loop_control:
+        loop_var: crd_name
+
+    - name: "Re-check installed CRDs version after verification (label on brokers CRD)"
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: "brokers.eventing.knative.dev"
+      register: _eventing_brokers_crd_post
+      changed_when: false
+
+    - name: "Assert Knative Eventing CRDs are at desired version"
+      ansible.builtin.assert:
+        that:
+          - "_eventing_brokers_crd_post.resources | length > 0"
+          - "_eventing_brokers_crd_post.resources[0].metadata.labels is defined"
+          - "'app.kubernetes.io/version' in _eventing_brokers_crd_post.resources[0].metadata.labels"
+          - "(_eventing_brokers_crd_post.resources[0].metadata.labels['app.kubernetes.io/version'] | regex_replace('^v','')) == (knative_eventing_desired_version | regex_replace('^v',''))"
+        fail_msg: >-
+          Knative Eventing CRDs are installed and Established, but version label does not match desired.
+          Desired={{ knative_eventing_desired_version }},
+          Found={{ _eventing_brokers_crd_post.resources[0].metadata.labels['app.kubernetes.io/version'] | default('missing') }}.
+        success_msg: >-
+          Knative Eventing CRDs are installed, Established, and at the latest stable version ({{ knative_eventing_desired_version }}).
+

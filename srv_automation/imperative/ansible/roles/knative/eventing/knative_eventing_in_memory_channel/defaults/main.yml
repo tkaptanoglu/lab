@@ -1,0 +1,15 @@
+---
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+knative_eventing_github_latest_api: "https://api.github.com/repos/knative/eventing/releases/latest"
+knative_eventing_imc_manifest_path: "/tmp/knative-eventing-in-memory-channel.yaml"
+
+knative_eventing_namespace: "knative-eventing"
+
+knative_eventing_imc_deployments:
+  - "imc-controller"
+  - "imc-dispatcher"
+
+knative_eventing_imc_verify_retries: 60
+knative_eventing_imc_verify_delay: 3
+

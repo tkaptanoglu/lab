@@ -1,0 +1,16 @@
+---
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+knative_eventing_github_latest_api: "https://api.github.com/repos/knative/eventing/releases/latest"
+knative_eventing_core_manifest_path: "/tmp/knative-eventing-core.yaml"
+
+knative_eventing_namespace: "knative-eventing"
+
+# Deployments expected from eventing-core.yaml
+knative_eventing_core_deployments:
+  - "eventing-controller"
+  - "eventing-webhook"
+
+knative_eventing_verify_retries: 60
+knative_eventing_verify_delay: 3
+

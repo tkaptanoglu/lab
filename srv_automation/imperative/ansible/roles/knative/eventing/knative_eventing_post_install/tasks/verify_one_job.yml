@@ -1,0 +1,20 @@
+---
+- name: "Wait for Job {{ job_obj.metadata.name }} to complete"
+  kubernetes.core.k8s_info:
+    api_version: batch/v1
+    kind: Job
+    namespace: "{{ knative_eventing_namespace }}"
+    name: "{{ job_obj.metadata.name }}"
+  register: _job
+  until: >-
+    (_job.resources | length) > 0 and
+    (
+      (_job.resources[0].status.succeeded | default(0)) | int
+    ) >= 1 and
+    (
+      (_job.resources[0].status.failed | default(0)) | int
+    ) == 0
+  retries: "{{ knative_eventing_post_install_job_retries }}"
+  delay: "{{ knative_eventing_post_install_job_delay }}"
+  changed_when: false
+

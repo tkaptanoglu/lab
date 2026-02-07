@@ -1,0 +1,24 @@
+---
+- name: "Wait for CRD {{ crd_name }} to be present and Established"
+  kubernetes.core.k8s_info:
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: "{{ crd_name }}"
+  register: _crd_check
+  until: >-
+    (_crd_check.resources | length) > 0 and
+    (
+      _crd_check.resources[0].status is defined and
+      _crd_check.resources[0].status.conditions is defined and
+      (
+        _crd_check.resources[0].status.conditions
+        | selectattr('type', 'equalto', 'Established')
+        | selectattr('status', 'equalto', 'True')
+        | list
+        | length
+      ) > 0
+    )
+  retries: "{{ knative_eventing_crd_verify_retries }}"
+  delay: "{{ knative_eventing_crd_verify_delay }}"
+  changed_when: false
+

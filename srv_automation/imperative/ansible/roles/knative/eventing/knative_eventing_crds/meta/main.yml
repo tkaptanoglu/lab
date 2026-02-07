@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: knative_eventing_crds
+  description: Install/upgrade Knative Eventing CRDs to latest stable and verify CRDs are Established.
+  min_ansible_version: "2.14"
+  license: Apache-2.0
+  platforms:
+    - name: Ubuntu
+      versions: ["jammy"]
+dependencies: []
+
