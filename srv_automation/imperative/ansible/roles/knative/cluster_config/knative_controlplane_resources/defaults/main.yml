@@ -1,0 +1,36 @@
+---
+knative_kubeconfig_path: /etc/kubernetes/admin.conf
+
+# Pi-friendly baseline resources (tweak after observing kubectl top)
+knative_controlplane_default_requests:
+  cpu: "50m"
+  memory: "128Mi"
+knative_controlplane_default_limits:
+  cpu: "200m"
+  memory: "256Mi"
+
+# Per-deployment overrides (optional). Keys are (namespace, deployment).
+# If not provided, defaults apply.
+knative_controlplane_overrides: {}
+
+# Target deployments
+knative_controlplane_deployments:
+  - { namespace: "knative-serving",  name: "activator" }
+  - { namespace: "knative-serving",  name: "autoscaler" }
+  - { namespace: "knative-serving",  name: "controller" }
+  - { namespace: "knative-serving",  name: "webhook" }
+
+  - { namespace: "knative-eventing", name: "eventing-controller" }
+  - { namespace: "knative-eventing", name: "eventing-webhook" }
+  - { namespace: "knative-eventing", name: "imc-controller" }
+  - { namespace: "knative-eventing", name: "imc-dispatcher" }
+  - { namespace: "knative-eventing", name: "mt-broker-controller" }
+  - { namespace: "knative-eventing", name: "mt-broker-filter" }
+  - { namespace: "knative-eventing", name: "mt-broker-ingress" }
+
+  - { namespace: "kourier-system",   name: "3scale-kourier-gateway" }
+
+# Verification timing
+knative_controlplane_verify_retries: 60
+knative_controlplane_verify_delay: 5
+

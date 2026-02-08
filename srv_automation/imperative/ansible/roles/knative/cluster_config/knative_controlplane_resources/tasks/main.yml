@@ -1,0 +1,15 @@
+---
+- name: "Knative control-plane resources | module defaults"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+  block:
+
+    - name: "Iterate deployments and apply resource patches if needed"
+      ansible.builtin.include_tasks: patch_one_deployment.yml
+      loop: "{{ knative_controlplane_deployments }}"
+      loop_control:
+        loop_var: _dep
+

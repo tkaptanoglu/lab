@@ -1,0 +1,19 @@
+---
+# Shared
+knative_kubeconfig_path: /etc/kubernetes/admin.conf
+
+# Knative Serving autoscaler defaults (Pi-friendly)
+# Cluster-wide ceiling for autoscaling. Must be >= 1.
+knative_serving_max_scale_limit: 10
+
+# Default per-revision max-scale (must be in [1, max-scale-limit]).
+# IMPORTANT: Knative rejects max-scale=0. If you previously had 0 in config-autoscaler,
+# this role will correct it to this value.
+knative_serving_max_scale: "{{ knative_serving_max_scale_limit }}"
+
+# Allow scale-to-zero (saves resources in a small cluster)
+knative_serving_enable_scale_to_zero: true
+
+# Stabilization window for scaling decisions
+knative_serving_stable_window: "60s"
+

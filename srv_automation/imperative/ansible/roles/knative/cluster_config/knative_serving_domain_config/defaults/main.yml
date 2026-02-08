@@ -1,0 +1,41 @@
+---
+knative_kubeconfig_path: /etc/kubernetes/admin.conf
+
+# Decision #1 Option B: LAN-only domain + wildcard DNS
+knative_serving_domain: "knative.test.lan"
+
+# Decision #3 Option B: internal CA via cert-manager integration
+knative_serving_tls_enabled: true
+
+# NEW: automatically install/upgrade cert-manager if TLS is enabled and cert-manager is missing/outdated
+knative_cert_manager_auto_install: true
+
+# Where cert-manager is installed
+knative_cert_manager_namespace: "cert-manager"
+
+# If TLS enabled, require cert-manager and create/manage an issuer.
+# Two supported issuer strategies:
+#  - selfsigned (easy, but clients must trust the issued certs explicitly)
+#  - ca (best for internal PKI; you provide a CA secret with tls.crt/tls.key)
+knative_serving_tls_issuer_strategy: "selfsigned"  # "selfsigned" | "ca"
+
+# For CA strategy: pre-existing secret containing CA keypair (tls.crt/tls.key)
+# NOTE: If you use "ca", you must create this secret yourself (or extend this role).
+knative_serving_tls_ca_secret_name: "internal-ca-keypair"
+knative_serving_tls_ca_secret_namespace: "cert-manager"
+
+# Use ClusterIssuer for cluster-wide issuance
+knative_serving_tls_use_cluster_issuer: true
+knative_serving_tls_issuer_name: "knative-internal-issuer"
+knative_serving_tls_issuer_namespace: "cert-manager"   # only used if not cluster issuer
+
+# Optional: create a wildcard certificate for your Knative domain into this secret.
+# Some setups use this as default TLS secret in config-network (role 2).
+knative_serving_tls_create_wildcard_cert: true
+knative_serving_tls_wildcard_secret_name: "knative-wildcard-tls"
+knative_serving_tls_wildcard_secret_namespace: "knative-serving"
+knative_serving_tls_wildcard_common_name: "{{ knative_serving_domain }}"
+knative_serving_tls_wildcard_dns_names:
+  - "*.{{ knative_serving_domain }}"
+  - "{{ knative_serving_domain }}"
+

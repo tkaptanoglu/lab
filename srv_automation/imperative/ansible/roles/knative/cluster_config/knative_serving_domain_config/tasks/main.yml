@@ -1,0 +1,456 @@
+---
+- name: "Knative Serving domain config | module defaults"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+  block:
+
+    # -------------------------
+    # config-domain
+    # -------------------------
+
+    - name: "Read Knative Serving config-domain ConfigMap"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: knative-serving
+        name: config-domain
+      register: _cm_domain
+      changed_when: false
+      ignore_errors: true
+
+    - name: "Extract current config-domain data"
+      ansible.builtin.set_fact:
+        _domain_current_data: >-
+          {{
+            _cm_domain.resources[0].data
+            if (_cm_domain.resources is defined and (_cm_domain.resources | length) > 0 and _cm_domain.resources[0].data is defined)
+            else {}
+          }}
+      changed_when: false
+
+    - name: "Compute desired config-domain data (preserve existing keys like _example)"
+      ansible.builtin.set_fact:
+        _domain_desired_data: "{{ _domain_current_data | combine({ (knative_serving_domain): '' }, recursive=True) }}"
+      changed_when: false
+
+    - name: "Extract current managed value for domain key"
+      ansible.builtin.set_fact:
+        _domain_current_value: "{{ _domain_current_data.get(knative_serving_domain, '__MISSING__') }}"
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip config-domain"
+      ansible.builtin.set_fact:
+        knative_serving_domain_action: >-
+          {{
+            'install'
+            if (_cm_domain.resources is not defined or (_cm_domain.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (_domain_current_value != '')
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show config-domain decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_serving_domain_action }}"
+          desired_domain: "{{ knative_serving_domain }}"
+          current_value: "{{ _domain_current_value }}"
+          tls_enabled: "{{ knative_serving_tls_enabled }}"
+      changed_when: false
+
+    - name: "Apply config-domain ConfigMap (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: config-domain
+            namespace: knative-serving
+          data: "{{ _domain_desired_data }}"
+      when: knative_serving_domain_action in ['install', 'upgrade']
+
+    - name: "Verify config-domain has our domain key with correct value"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: knative-serving
+        name: config-domain
+      register: _cm_domain_post
+      until: >-
+        (_cm_domain_post.resources | length) > 0 and
+        (_cm_domain_post.resources[0].data is defined) and
+        (_cm_domain_post.resources[0].data.get(knative_serving_domain, '__MISSING__') == '')
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    # -------------------------
+    # TLS via cert-manager (internal CA)
+    # -------------------------
+
+    - name: "Skip TLS configuration if disabled"
+      ansible.builtin.debug:
+        msg: "TLS integration disabled; skipping cert-manager + issuer config."
+      when: not knative_serving_tls_enabled
+      changed_when: false
+
+    # --- Discover latest stable cert-manager release (GitHub API) ---
+    - name: "Discover latest stable cert-manager release (GitHub API)"
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/cert-manager/cert-manager/releases/latest"
+        return_content: true
+        headers:
+          Accept: "application/vnd.github+json"
+      register: _cm_latest
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Set desired cert-manager tag/version and manifest URL"
+      ansible.builtin.set_fact:
+        knative_cert_manager_desired_tag: "{{ _cm_latest.json.tag_name }}"
+        knative_cert_manager_desired_version: "{{ (_cm_latest.json.tag_name | regex_replace('^v','')) }}"
+        knative_cert_manager_manifest_url: "https://github.com/cert-manager/cert-manager/releases/download/{{ _cm_latest.json.tag_name }}/cert-manager.yaml"
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    # --- Check if cert-manager is already installed ---
+    - name: "Check cert-manager CRD exists (certificates.cert-manager.io)"
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: certificates.cert-manager.io
+      register: _cm_crd
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Read cert-manager namespace (to detect installed version)"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_cert_manager_namespace }}"
+      register: _cm_ns
+      ignore_errors: true
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Extract installed cert-manager version from namespace label (if present)"
+      ansible.builtin.set_fact:
+        knative_cert_manager_installed_version: >-
+          {{
+            (
+              _cm_ns.resources[0].metadata.labels['app.kubernetes.io/version']
+              if (_cm_ns.resources is defined and (_cm_ns.resources | length) > 0 and
+                  _cm_ns.resources[0].metadata is defined and
+                  _cm_ns.resources[0].metadata.labels is defined and
+                  (_cm_ns.resources[0].metadata.labels['app.kubernetes.io/version'] is defined))
+              else ''
+            )
+          }}
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Fallback: get installed cert-manager version from deployment label (cert-manager)"
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ knative_cert_manager_namespace }}"
+        name: cert-manager
+      register: _cm_dep
+      ignore_errors: true
+      changed_when: false
+      when: knative_serving_tls_enabled and (knative_cert_manager_installed_version | default('') | length == 0)
+
+    - name: "Set installed cert-manager version from deployment label (fallback)"
+      ansible.builtin.set_fact:
+        knative_cert_manager_installed_version: >-
+          {{
+            (
+              _cm_dep.resources[0].metadata.labels['app.kubernetes.io/version']
+              if (_cm_dep.resources is defined and (_cm_dep.resources | length) > 0 and
+                  _cm_dep.resources[0].metadata.labels is defined and
+                  (_cm_dep.resources[0].metadata.labels['app.kubernetes.io/version'] is defined))
+              else ''
+            )
+          }}
+      changed_when: false
+      when: knative_serving_tls_enabled and (knative_cert_manager_installed_version | default('') | length == 0)
+
+    - name: "Normalize installed cert-manager version (strip leading v)"
+      ansible.builtin.set_fact:
+        knative_cert_manager_installed_version: "{{ (knative_cert_manager_installed_version | default('') | regex_replace('^v','')) }}"
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Decide whether to install/upgrade/skip cert-manager"
+      ansible.builtin.set_fact:
+        knative_cert_manager_action: >-
+          {{
+            'install'
+            if ((_cm_crd.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if ((knative_cert_manager_installed_version | default('')) != (knative_cert_manager_desired_version | default('')))
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Show cert-manager decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_cert_manager_action }}"
+          desired_tag: "{{ knative_cert_manager_desired_tag }}"
+          desired_version: "{{ knative_cert_manager_desired_version }}"
+          installed_version: "{{ knative_cert_manager_installed_version }}"
+          manifest_url: "{{ knative_cert_manager_manifest_url }}"
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Fail if cert-manager is missing and auto-install is disabled"
+      ansible.builtin.fail:
+        msg: >-
+          TLS is enabled (internal CA), but cert-manager is not installed (CRD certificates.cert-manager.io missing),
+          and knative_cert_manager_auto_install=false. Install cert-manager first, then re-run.
+      when: knative_serving_tls_enabled and (knative_cert_manager_action == 'install') and (not knative_cert_manager_auto_install | bool)
+
+    - name: "Download cert-manager manifest (only if install/upgrade needed)"
+      ansible.builtin.get_url:
+        url: "{{ knative_cert_manager_manifest_url }}"
+        dest: "/tmp/cert-manager.yaml"
+        mode: "0644"
+      when: knative_serving_tls_enabled and knative_cert_manager_auto_install | bool and (knative_cert_manager_action in ['install','upgrade'])
+
+    - name: "Apply cert-manager manifest (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        src: "/tmp/cert-manager.yaml"
+      when: knative_serving_tls_enabled and knative_cert_manager_auto_install | bool and (knative_cert_manager_action in ['install','upgrade'])
+
+    - name: "Verify cert-manager CRD exists after install/upgrade (certificates.cert-manager.io)"
+      kubernetes.core.k8s_info:
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: certificates.cert-manager.io
+      register: _cm_crd_post
+      until: "(_cm_crd_post.resources | length) > 0"
+      retries: 60
+      delay: 2
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Wait for cert-manager deployments to be Available"
+      ansible.builtin.include_tasks: wait_cert_manager_deploy.yml
+      loop:
+        - cert-manager
+        - cert-manager-webhook
+        - cert-manager-cainjector
+      loop_control:
+        loop_var: _cm_deploy_name
+      when: knative_serving_tls_enabled
+
+    # --- Issuer creation ---
+    - name: "Build desired issuer resource (ClusterIssuer or Issuer)"
+      ansible.builtin.set_fact:
+        _issuer_api_version: cert-manager.io/v1
+        _issuer_kind: "{{ 'ClusterIssuer' if knative_serving_tls_use_cluster_issuer else 'Issuer' }}"
+        _issuer_metadata:
+          name: "{{ knative_serving_tls_issuer_name }}"
+          namespace: "{{ (knative_serving_tls_issuer_namespace if not knative_serving_tls_use_cluster_issuer else omit) }}"
+        _issuer_spec: >-
+          {{
+            {'selfSigned': {}}
+            if knative_serving_tls_issuer_strategy == 'selfsigned'
+            else
+            {'ca': {'secretName': knative_serving_tls_ca_secret_name}}
+          }}
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Read existing issuer"
+      kubernetes.core.k8s_info:
+        api_version: "{{ _issuer_api_version }}"
+        kind: "{{ _issuer_kind }}"
+        name: "{{ knative_serving_tls_issuer_name }}"
+        namespace: "{{ (knative_serving_tls_issuer_namespace if not knative_serving_tls_use_cluster_issuer else omit) }}"
+      register: _issuer_current
+      ignore_errors: true
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Compute issuer desired signature"
+      ansible.builtin.set_fact:
+        _issuer_desired_sig: "{{ {'apiVersion': _issuer_api_version, 'kind': _issuer_kind, 'metadata': _issuer_metadata, 'spec': _issuer_spec} | to_json }}"
+        _issuer_current_sig: >-
+          {{
+            (
+              {
+                'apiVersion': _issuer_current.resources[0].apiVersion,
+                'kind': _issuer_current.resources[0].kind,
+                'metadata': {'name': _issuer_current.resources[0].metadata.name},
+                'spec': _issuer_current.resources[0].spec
+              } | to_json
+            )
+            if (_issuer_current.resources is defined and (_issuer_current.resources | length) > 0)
+            else ''
+          }}
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Decide whether to install/upgrade/skip issuer"
+      ansible.builtin.set_fact:
+        knative_serving_tls_issuer_action: >-
+          {{
+            'install'
+            if (_issuer_current.resources is not defined or (_issuer_current.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (_issuer_current_sig != _issuer_desired_sig)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Show issuer decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_serving_tls_issuer_action }}"
+          kind: "{{ _issuer_kind }}"
+          name: "{{ knative_serving_tls_issuer_name }}"
+          strategy: "{{ knative_serving_tls_issuer_strategy }}"
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    - name: "Apply issuer (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: "{{ _issuer_api_version }}"
+          kind: "{{ _issuer_kind }}"
+          metadata: "{{ _issuer_metadata }}"
+          spec: "{{ _issuer_spec }}"
+      when: knative_serving_tls_enabled and knative_serving_tls_issuer_action in ['install', 'upgrade']
+
+    - name: "Verify issuer exists"
+      kubernetes.core.k8s_info:
+        api_version: "{{ _issuer_api_version }}"
+        kind: "{{ _issuer_kind }}"
+        name: "{{ knative_serving_tls_issuer_name }}"
+        namespace: "{{ (knative_serving_tls_issuer_namespace if not knative_serving_tls_use_cluster_issuer else omit) }}"
+      register: _issuer_post
+      until: "(_issuer_post.resources | length) > 0"
+      retries: 30
+      delay: 2
+      changed_when: false
+      when: knative_serving_tls_enabled
+
+    # --- Wildcard certificate ---
+    - name: "Optionally create wildcard Certificate for Knative domain"
+      when: knative_serving_tls_enabled and knative_serving_tls_create_wildcard_cert
+      block:
+
+        - name: "Read existing wildcard Certificate"
+          kubernetes.core.k8s_info:
+            api_version: cert-manager.io/v1
+            kind: Certificate
+            namespace: "{{ knative_serving_tls_wildcard_secret_namespace }}"
+            name: "{{ knative_serving_tls_wildcard_secret_name }}"
+          register: _cert_current
+          ignore_errors: true
+          changed_when: false
+
+        - name: "Build desired wildcard Certificate spec"
+          ansible.builtin.set_fact:
+            _cert_desired_def:
+              apiVersion: cert-manager.io/v1
+              kind: Certificate
+              metadata:
+                name: "{{ knative_serving_tls_wildcard_secret_name }}"
+                namespace: "{{ knative_serving_tls_wildcard_secret_namespace }}"
+              spec:
+                secretName: "{{ knative_serving_tls_wildcard_secret_name }}"
+                commonName: "{{ knative_serving_tls_wildcard_common_name }}"
+                dnsNames: "{{ knative_serving_tls_wildcard_dns_names }}"
+                issuerRef:
+                  name: "{{ knative_serving_tls_issuer_name }}"
+                  kind: "{{ _issuer_kind }}"
+                  group: cert-manager.io
+          changed_when: false
+
+        - name: "Compute cert signatures"
+          ansible.builtin.set_fact:
+            _cert_desired_sig: "{{ _cert_desired_def.spec | to_json }}"
+            _cert_current_sig: >-
+              {{
+                (_cert_current.resources[0].spec | to_json)
+                if (_cert_current.resources is defined and (_cert_current.resources | length) > 0 and _cert_current.resources[0].spec is defined)
+                else ''
+              }}
+          changed_when: false
+
+        - name: "Decide cert action"
+          ansible.builtin.set_fact:
+            knative_serving_tls_cert_action: >-
+              {{
+                'install'
+                if (_cert_current.resources is not defined or (_cert_current.resources | length) == 0)
+                else
+                (
+                  'upgrade'
+                  if (_cert_current_sig != _cert_desired_sig)
+                  else
+                  'skip'
+                )
+              }}
+          changed_when: false
+
+        - name: "Show wildcard cert decision"
+          ansible.builtin.debug:
+            msg:
+              action: "{{ knative_serving_tls_cert_action }}"
+              secret: "{{ knative_serving_tls_wildcard_secret_namespace }}/{{ knative_serving_tls_wildcard_secret_name }}"
+              dnsNames: "{{ knative_serving_tls_wildcard_dns_names }}"
+          changed_when: false
+
+        - name: "Apply wildcard Certificate (install/upgrade)"
+          kubernetes.core.k8s:
+            state: present
+            resource_definition: "{{ _cert_desired_def }}"
+          when: knative_serving_tls_cert_action in ['install', 'upgrade']
+
+        - name: "Verify wildcard Certificate is Ready"
+          kubernetes.core.k8s_info:
+            api_version: cert-manager.io/v1
+            kind: Certificate
+            namespace: "{{ knative_serving_tls_wildcard_secret_namespace }}"
+            name: "{{ knative_serving_tls_wildcard_secret_name }}"
+          register: _cert_post
+          until: >-
+            (_cert_post.resources | length) > 0 and
+            (
+              (
+                _cert_post.resources[0].status.conditions | default([])
+                | selectattr('type','equalto','Ready')
+                | selectattr('status','equalto','True')
+                | list
+                | length
+              ) > 0
+            )
+          retries: 60
+          delay: 5
+          changed_when: false
+

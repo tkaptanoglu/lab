@@ -1,0 +1,25 @@
+---
+knative_kubeconfig_path: /etc/kubernetes/admin.conf
+
+# Kourier is your chosen Knative networking layer
+knative_serving_ingress_class: "kourier.ingress.networking.knative.dev"
+
+# Decision #2 Option A: expose Kourier via LoadBalancer (MetalLB)
+knative_kourier_namespace: "kourier-system"
+knative_kourier_service_name: "kourier"
+knative_kourier_service_type: "LoadBalancer"
+
+# Decision #3 Option B: internal CA → default external scheme https
+# (Knative will still work over http; this influences default URL scheme/behavior)
+knative_serving_default_external_scheme: "https"  # "http" or "https"
+
+# If you created a wildcard cert in role 1, you can set this as the default TLS secret.
+# Many clusters also do per-service certs, but default secret is a useful baseline.
+knative_serving_default_tls_secret_namespace: "knative-serving"
+knative_serving_default_tls_secret_name: "knative-wildcard-tls"
+knative_serving_set_default_tls_secret: true
+
+# Verification timing
+knative_serving_network_verify_retries: 60
+knative_serving_network_verify_delay: 5
+

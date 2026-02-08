@@ -16,3 +16,7 @@
     - role: roles/knative/eventing/knative_eventing_post_install
     - role: roles/knative/eventing/knative_eventing_receivers
     - role: roles/knative/eventing/knative_eventing_defaults
+    - role: roles/knative/cluster_config/knative_serving_domain_config
+    - role: roles/knative/cluster_config/knative_serving_network_config
+    - role: roles/knative/cluster_config/knative_serving_autoscaler_config
+    - role: roles/knative/cluster_config/knative_controlplane_resources

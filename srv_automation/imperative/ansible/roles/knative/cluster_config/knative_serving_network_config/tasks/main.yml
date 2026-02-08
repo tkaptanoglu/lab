@@ -1,0 +1,222 @@
+---
+- name: "Knative Serving network config | module defaults"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+  block:
+
+    # -------------------------
+    # config-network (Knative Serving)
+    # -------------------------
+
+    - name: "Read Knative Serving config-network ConfigMap"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: knative-serving
+        name: config-network
+      register: _cm_network
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract current config-network data"
+      ansible.builtin.set_fact:
+        _network_current_data: >-
+          {{
+            _cm_network.resources[0].data
+            if (_cm_network.resources is defined and (_cm_network.resources | length) > 0 and _cm_network.resources[0].data is defined)
+            else {}
+          }}
+      changed_when: false
+
+    - name: "Compute desired managed keys for config-network"
+      ansible.builtin.set_fact:
+        _network_managed_desired:
+          ingress-class: "{{ knative_serving_ingress_class }}"
+          default-ingress-class: "{{ knative_serving_ingress_class }}"
+          default-external-scheme: "{{ knative_serving_default_external_scheme }}"
+      changed_when: false
+
+    - name: "Optionally add default TLS secret to desired managed keys"
+      ansible.builtin.set_fact:
+        _network_managed_desired: >-
+          {{
+            _network_managed_desired | combine(
+              {
+                'default-tls-secret': (knative_serving_default_tls_secret_namespace ~ '/' ~ knative_serving_default_tls_secret_name)
+              },
+              recursive=True
+            )
+          }}
+      when: knative_serving_set_default_tls_secret | bool
+      changed_when: false
+
+    - name: "Compute full desired config-network data (preserve existing keys like _example)"
+      ansible.builtin.set_fact:
+        _network_desired_data: "{{ _network_current_data | combine(_network_managed_desired, recursive=True) }}"
+      changed_when: false
+
+    - name: "Extract current values for managed keys"
+      ansible.builtin.set_fact:
+        _network_managed_current:
+          ingress-class: "{{ _network_current_data.get('ingress-class', '__MISSING__') }}"
+          default-ingress-class: "{{ _network_current_data.get('default-ingress-class', '__MISSING__') }}"
+          default-external-scheme: "{{ _network_current_data.get('default-external-scheme', '__MISSING__') }}"
+          default-tls-secret: "{{ _network_current_data.get('default-tls-secret', '__MISSING__') }}"
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip config-network"
+      ansible.builtin.set_fact:
+        knative_serving_network_cm_action: >-
+          {{
+            'install'
+            if (_cm_network.resources is not defined or (_cm_network.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (
+                _network_current_data.get('ingress-class', '__MISSING__') != _network_managed_desired.get('ingress-class') or
+                _network_current_data.get('default-ingress-class', '__MISSING__') != _network_managed_desired.get('default-ingress-class') or
+                _network_current_data.get('default-external-scheme', '__MISSING__') != _network_managed_desired.get('default-external-scheme') or
+                (
+                  (knative_serving_set_default_tls_secret | bool) and
+                  (_network_current_data.get('default-tls-secret', '__MISSING__') != _network_managed_desired.get('default-tls-secret'))
+                )
+              )
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show config-network decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_serving_network_cm_action }}"
+          desired:
+            ingress_class: "{{ _network_managed_desired['ingress-class'] }}"
+            default_ingress_class: "{{ _network_managed_desired['default-ingress-class'] }}"
+            default_external_scheme: "{{ _network_managed_desired['default-external-scheme'] }}"
+            default_tls_secret: "{{ _network_managed_desired.get('default-tls-secret', 'not set') }}"
+          current:
+            ingress_class: "{{ _network_managed_current['ingress-class'] }}"
+            default_ingress_class: "{{ _network_managed_current['default-ingress-class'] }}"
+            default_external_scheme: "{{ _network_managed_current['default-external-scheme'] }}"
+            default_tls_secret: "{{ _network_managed_current['default-tls-secret'] }}"
+      changed_when: false
+
+    - name: "Apply config-network ConfigMap (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: config-network
+            namespace: knative-serving
+          data: "{{ _network_desired_data }}"
+      when: knative_serving_network_cm_action in ['install', 'upgrade']
+
+    - name: "Verify managed keys in config-network match desired"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: knative-serving
+        name: config-network
+      register: _cm_network_post
+      until: >-
+        (_cm_network_post.resources | length) > 0 and
+        (_cm_network_post.resources[0].data is defined) and
+        (_cm_network_post.resources[0].data.get('ingress-class', '__MISSING__') == _network_managed_desired.get('ingress-class')) and
+        (_cm_network_post.resources[0].data.get('default-ingress-class', '__MISSING__') == _network_managed_desired.get('default-ingress-class')) and
+        (_cm_network_post.resources[0].data.get('default-external-scheme', '__MISSING__') == _network_managed_desired.get('default-external-scheme')) and
+        (
+          (not (knative_serving_set_default_tls_secret | bool)) or
+          (_cm_network_post.resources[0].data.get('default-tls-secret', '__MISSING__') == _network_managed_desired.get('default-tls-secret'))
+        )
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    # -------------------------
+    # Kourier Service exposure (LoadBalancer)
+    # -------------------------
+
+    - name: "Read Kourier Service"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        namespace: "{{ knative_kourier_namespace }}"
+        name: "{{ knative_kourier_service_name }}"
+      register: _kourier_svc
+      changed_when: false
+
+    - name: "Extract current Kourier service type"
+      ansible.builtin.set_fact:
+        _kourier_current_type: "{{ _kourier_svc.resources[0].spec.type | default('ClusterIP') }}"
+      changed_when: false
+
+    - name: "Decide whether to upgrade Kourier service to LoadBalancer"
+      ansible.builtin.set_fact:
+        knative_kourier_service_action: >-
+          {{
+            'skip'
+            if (_kourier_current_type == knative_kourier_service_type)
+            else
+            'upgrade'
+          }}
+      changed_when: false
+
+    - name: "Show Kourier service decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_kourier_service_action }}"
+          current_type: "{{ _kourier_current_type }}"
+          desired_type: "{{ knative_kourier_service_type }}"
+      changed_when: false
+
+    - name: "Patch Kourier Service type"
+      kubernetes.core.k8s:
+        state: present
+        api_version: v1
+        kind: Service
+        namespace: "{{ knative_kourier_namespace }}"
+        name: "{{ knative_kourier_service_name }}"
+        resource_definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ knative_kourier_service_name }}"
+            namespace: "{{ knative_kourier_namespace }}"
+          spec:
+            type: "{{ knative_kourier_service_type }}"
+      when: knative_kourier_service_action == 'upgrade'
+
+    - name: "Verify Kourier Service is LoadBalancer (and optionally has an assigned ingress IP/hostname)"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        namespace: "{{ knative_kourier_namespace }}"
+        name: "{{ knative_kourier_service_name }}"
+      register: _kourier_svc_post
+      until: >-
+        (_kourier_svc_post.resources | length) > 0 and
+        ((_kourier_svc_post.resources[0].spec.type | default('ClusterIP')) == knative_kourier_service_type) and
+        (
+          (not (knative_kourier_require_loadbalancer_ingress | default(false) | bool)) or
+          (
+            _kourier_svc_post.resources[0].status.loadBalancer is defined and
+            _kourier_svc_post.resources[0].status.loadBalancer.ingress is defined and
+            (_kourier_svc_post.resources[0].status.loadBalancer.ingress | length) > 0 and
+            (
+              (_kourier_svc_post.resources[0].status.loadBalancer.ingress[0].ip is defined and (_kourier_svc_post.resources[0].status.loadBalancer.ingress[0].ip | length) > 0) or
+              (_kourier_svc_post.resources[0].status.loadBalancer.ingress[0].hostname is defined and (_kourier_svc_post.resources[0].status.loadBalancer.ingress[0].hostname | length) > 0)
+            )
+          )
+        )
+      retries: "{{ knative_serving_network_verify_retries }}"
+      delay: "{{ knative_serving_network_verify_delay }}"
+      changed_when: false
+

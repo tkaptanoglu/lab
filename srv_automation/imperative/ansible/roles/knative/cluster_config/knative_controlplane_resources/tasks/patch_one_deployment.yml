@@ -1,0 +1,143 @@
+---
+- name: "Read Deployment {{ _dep.namespace }}/{{ _dep.name }}"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ _dep.namespace }}"
+    name: "{{ _dep.name }}"
+  register: _dep_info
+  changed_when: false
+  ignore_errors: true
+
+- name: "Skip if Deployment not found (some components may differ by version/install)"
+  ansible.builtin.debug:
+    msg: "Deployment {{ _dep.namespace }}/{{ _dep.name }} not found; skipping."
+  when: (_dep_info.resources is not defined) or (_dep_info.resources | length == 0)
+  changed_when: false
+
+- name: "Compute desired resources for {{ _dep.namespace }}/{{ _dep.name }}"
+  ansible.builtin.set_fact:
+    _desired_requests: >-
+      {{
+        (knative_controlplane_overrides.get(_dep.namespace ~ '/' ~ _dep.name, {}).get('requests', knative_controlplane_default_requests))
+      }}
+    _desired_limits: >-
+      {{
+        (knative_controlplane_overrides.get(_dep.namespace ~ '/' ~ _dep.name, {}).get('limits', knative_controlplane_default_limits))
+      }}
+  when: (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+  changed_when: false
+
+- name: "Extract current resources (first container) for {{ _dep.namespace }}/{{ _dep.name }}"
+  ansible.builtin.set_fact:
+    _current_resources: >-
+      {{
+        (
+          _dep_info.resources[0].spec.template.spec.containers[0].resources
+          if (_dep_info.resources[0].spec is defined
+              and _dep_info.resources[0].spec.template is defined
+              and _dep_info.resources[0].spec.template.spec is defined
+              and _dep_info.resources[0].spec.template.spec.containers is defined
+              and (_dep_info.resources[0].spec.template.spec.containers | length) > 0
+              and _dep_info.resources[0].spec.template.spec.containers[0].resources is defined)
+          else {}
+        )
+      }}
+    _current_sig: >-
+      {{
+        (
+          {
+            'requests': (
+              _dep_info.resources[0].spec.template.spec.containers[0].resources.requests | default({})
+            ),
+            'limits': (
+              _dep_info.resources[0].spec.template.spec.containers[0].resources.limits | default({})
+            )
+          } | to_json
+        )
+      }}
+    _desired_sig: "{{ {'requests': _desired_requests, 'limits': _desired_limits} | to_json }}"
+  when: (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+  changed_when: false
+
+- name: "Decide whether to patch resources for {{ _dep.namespace }}/{{ _dep.name }}"
+  ansible.builtin.set_fact:
+    knative_dep_patch_action: >-
+      {{
+        'upgrade'
+        if (_current_sig != _desired_sig)
+        else
+        'skip'
+      }}
+  when: (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+  changed_when: false
+
+- name: "Show patch decision for {{ _dep.namespace }}/{{ _dep.name }}"
+  ansible.builtin.debug:
+    msg:
+      action: "{{ knative_dep_patch_action }}"
+      deployment: "{{ _dep.namespace }}/{{ _dep.name }}"
+      desired:
+        requests: "{{ _desired_requests }}"
+        limits: "{{ _desired_limits }}"
+  when: (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+  changed_when: false
+
+- name: "Patch Deployment resources (first container) for {{ _dep.namespace }}/{{ _dep.name }}"
+  kubernetes.core.k8s:
+    state: present
+    resource_definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ _dep.name }}"
+        namespace: "{{ _dep.namespace }}"
+      spec:
+        template:
+          spec:
+            containers:
+              - name: "{{ _dep_info.resources[0].spec.template.spec.containers[0].name }}"
+                resources:
+                  requests: "{{ _desired_requests }}"
+                  limits: "{{ _desired_limits }}"
+  when:
+    - (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+    - knative_dep_patch_action == 'upgrade'
+
+- name: "Verify Deployment {{ _dep.namespace }}/{{ _dep.name }} is Available after patch (or already)"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ _dep.namespace }}"
+    name: "{{ _dep.name }}"
+  register: _dep_post
+  until: >-
+    (_dep_post.resources | length) > 0 and
+    (
+      (
+        _dep_post.resources[0].status.conditions | default([])
+        | selectattr('type','equalto','Available')
+        | selectattr('status','equalto','True')
+        | list
+        | length
+      ) > 0
+    )
+  retries: "{{ knative_controlplane_verify_retries }}"
+  delay: "{{ knative_controlplane_verify_delay }}"
+  when: (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+  changed_when: false
+
+- name: "Verify patched resources match desired for {{ _dep.namespace }}/{{ _dep.name }}"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          {
+            'requests': (_dep_post.resources[0].spec.template.spec.containers[0].resources.requests | default({})),
+            'limits': (_dep_post.resources[0].spec.template.spec.containers[0].resources.limits | default({}))
+          } | to_json
+        ) == _desired_sig
+    fail_msg: "Deployment {{ _dep.namespace }}/{{ _dep.name }} is Available but resources do not match desired."
+    success_msg: "Deployment {{ _dep.namespace }}/{{ _dep.name }} is Available and resources match desired."
+  when: (_dep_info.resources is defined) and (_dep_info.resources | length > 0)
+

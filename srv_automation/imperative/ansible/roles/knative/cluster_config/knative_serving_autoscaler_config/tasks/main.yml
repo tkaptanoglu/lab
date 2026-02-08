@@ -1,0 +1,162 @@
+---
+- name: "Knative Serving autoscaler config | module defaults"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path }}"
+  block:
+
+    # -------------------------
+    # config-autoscaler (Knative Serving)
+    # -------------------------
+
+    - name: "Read Knative Serving config-autoscaler ConfigMap"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: knative-serving
+        name: config-autoscaler
+      register: _cm_as
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract current autoscaler config data"
+      ansible.builtin.set_fact:
+        _as_current_data: >-
+          {{
+            _cm_as.resources[0].data
+            if (_cm_as.resources is defined and (_cm_as.resources | length) > 0 and _cm_as.resources[0].data is defined)
+            else {}
+          }}
+      changed_when: false
+
+    - name: "Extract current max-scale (raw) and determine if invalid"
+      ansible.builtin.set_fact:
+        _as_current_max_scale_raw: "{{ _as_current_data.get('max-scale', '__MISSING__') }}"
+        _as_current_max_scale_is_invalid: >-
+          {{
+            (_as_current_data.get('max-scale', '__MISSING__') != '__MISSING__')
+            and
+            (
+              (_as_current_data.get('max-scale') | string) == '0'
+            )
+          }}
+      changed_when: false
+
+    - name: "Compute desired managed autoscaler base keys"
+      ansible.builtin.set_fact:
+        _as_managed_desired_base:
+          # Cluster-wide ceiling (Knative validation uses this as upper bound)
+          max-scale-limit: "{{ knative_serving_max_scale_limit | string }}"
+          # Allow scale-to-zero
+          enable-scale-to-zero: "{{ (knative_serving_enable_scale_to_zero | bool) | ternary('true','false') }}"
+          # Stabilization window (e.g. '60s')
+          stable-window: "{{ knative_serving_stable_window }}"
+      changed_when: false
+
+    - name: "Compute desired managed autoscaler keys (correct invalid max-scale=0)"
+      ansible.builtin.set_fact:
+        _as_managed_desired: >-
+          {{
+            _as_managed_desired_base
+            | combine(
+                (
+                  {'max-scale': (knative_serving_max_scale | int | string)}
+                  if (_as_current_max_scale_is_invalid or (_as_current_max_scale_raw == '__MISSING__'))
+                  else {}
+                ),
+                recursive=True
+              )
+          }}
+      changed_when: false
+
+    - name: "Compute full desired config-autoscaler data (preserve existing keys like _example)"
+      ansible.builtin.set_fact:
+        _as_desired_data: "{{ _as_current_data | combine(_as_managed_desired, recursive=True) }}"
+      changed_when: false
+
+    - name: "Extract current values for managed autoscaler keys"
+      ansible.builtin.set_fact:
+        _as_managed_current:
+          max-scale-limit: "{{ _as_current_data.get('max-scale-limit', '__MISSING__') }}"
+          enable-scale-to-zero: "{{ _as_current_data.get('enable-scale-to-zero', '__MISSING__') }}"
+          stable-window: "{{ _as_current_data.get('stable-window', '__MISSING__') }}"
+          max-scale: "{{ _as_current_data.get('max-scale', '__MISSING__') }}"
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip config-autoscaler"
+      ansible.builtin.set_fact:
+        knative_serving_autoscaler_action: >-
+          {{
+            'install'
+            if (_cm_as.resources is not defined or (_cm_as.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (
+                _as_managed_current['max-scale-limit'] != _as_managed_desired_base['max-scale-limit'] or
+                _as_managed_current['enable-scale-to-zero'] != _as_managed_desired_base['enable-scale-to-zero'] or
+                _as_managed_current['stable-window'] != _as_managed_desired_base['stable-window'] or
+                (
+                  ('max-scale' in _as_managed_desired) and
+                  ((_as_managed_current['max-scale'] | string) != (_as_managed_desired['max-scale'] | string))
+                )
+              )
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show autoscaler decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_serving_autoscaler_action }}"
+          current:
+            max_scale_limit: "{{ _as_managed_current['max-scale-limit'] }}"
+            scale_to_zero: "{{ _as_managed_current['enable-scale-to-zero'] }}"
+            stable_window: "{{ _as_managed_current['stable-window'] }}"
+            max_scale: "{{ _as_managed_current['max-scale'] }}"
+          desired:
+            max_scale_limit: "{{ _as_managed_desired_base['max-scale-limit'] }}"
+            scale_to_zero: "{{ _as_managed_desired_base['enable-scale-to-zero'] }}"
+            stable_window: "{{ _as_managed_desired_base['stable-window'] }}"
+            max_scale: "{{ _as_managed_desired.get('max-scale', 'unchanged') }}"
+          notes:
+            corrected_invalid_max_scale: "{{ _as_current_max_scale_is_invalid }}"
+      changed_when: false
+
+    - name: "Apply config-autoscaler ConfigMap (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: config-autoscaler
+            namespace: knative-serving
+          data: "{{ _as_desired_data }}"
+      when: knative_serving_autoscaler_action in ['install', 'upgrade']
+
+    - name: "Verify managed keys in config-autoscaler match desired"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        namespace: knative-serving
+        name: config-autoscaler
+      register: _cm_as_post
+      until: >-
+        (_cm_as_post.resources | length) > 0 and
+        (_cm_as_post.resources[0].data is defined) and
+        (_cm_as_post.resources[0].data.get('max-scale-limit', '__MISSING__') == _as_managed_desired_base.get('max-scale-limit')) and
+        (_cm_as_post.resources[0].data.get('enable-scale-to-zero', '__MISSING__') == _as_managed_desired_base.get('enable-scale-to-zero')) and
+        (_cm_as_post.resources[0].data.get('stable-window', '__MISSING__') == _as_managed_desired_base.get('stable-window')) and
+        (
+          ('max-scale' not in _as_managed_desired) or
+          ((_cm_as_post.resources[0].data.get('max-scale', '__MISSING__') | string) == (_as_managed_desired.get('max-scale') | string))
+        )
+      retries: 30
+      delay: 2
+      changed_when: false
+
