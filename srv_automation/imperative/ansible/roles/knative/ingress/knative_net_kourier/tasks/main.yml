@@ -81,7 +81,7 @@
             else
             (
               'upgrade'
-              if (knative_net_kourier_installed_version != knative_net_kourier_desired_version)
+              if ((knative_net_kourier_installed_version | regex_replace('^v','')) != (knative_net_kourier_desired_version | regex_replace('^v','')))
               else
               'skip'
             )

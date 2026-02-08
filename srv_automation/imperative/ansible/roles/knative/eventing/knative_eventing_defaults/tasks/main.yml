@@ -1,0 +1,582 @@
+---
+- name: "Knative Eventing defaults | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    # -------------------------
+    # Broker
+    # -------------------------
+
+    - name: "Check if Broker exists"
+      kubernetes.core.k8s_info:
+        api_version: eventing.knative.dev/v1
+        kind: Broker
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_broker_name }}"
+      register: _broker
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Decide whether to install/skip Broker"
+      ansible.builtin.set_fact:
+        knative_eventing_broker_action: >-
+          {{
+            'install'
+            if (_broker.resources is not defined or (_broker.resources | length) == 0)
+            else
+            'skip'
+          }}
+      changed_when: false
+
+    - name: "Show Broker decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_broker_action }}"
+          namespace: "{{ knative_eventing_workloads_namespace }}"
+          broker: "{{ knative_eventing_broker_name }}"
+      changed_when: false
+
+    - name: "Apply Broker (install only)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: eventing.knative.dev/v1
+          kind: Broker
+          metadata:
+            name: "{{ knative_eventing_broker_name }}"
+            namespace: "{{ knative_eventing_workloads_namespace }}"
+      when: knative_eventing_broker_action == 'install'
+
+    - name: "Wait for Broker to be Ready and have an address URL"
+      kubernetes.core.k8s_info:
+        api_version: eventing.knative.dev/v1
+        kind: Broker
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_broker_name }}"
+      register: _broker_post
+      until: >-
+        (_broker_post.resources | length) > 0 and
+        (
+          (
+            _broker_post.resources[0].status.conditions | default([])
+            | selectattr('type','equalto','Ready')
+            | selectattr('status','equalto','True')
+            | list
+            | length
+          ) > 0
+        ) and
+        (
+          _broker_post.resources[0].status.address is defined and
+          _broker_post.resources[0].status.address.url is defined and
+          (_broker_post.resources[0].status.address.url | length) > 0
+        )
+      retries: "{{ knative_eventing_defaults_verify_retries }}"
+      delay: "{{ knative_eventing_defaults_verify_delay }}"
+      changed_when: false
+
+    # -------------------------
+    # Trigger (catch-all to receiver)
+    # -------------------------
+
+    - name: "Check if Trigger exists"
+      kubernetes.core.k8s_info:
+        api_version: eventing.knative.dev/v1
+        kind: Trigger
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_trigger_name }}"
+      register: _trigger
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract current Trigger subscriber (if present)"
+      ansible.builtin.set_fact:
+        _trigger_current_broker: >-
+          {{
+            (_trigger.resources[0].spec.broker)
+            if (_trigger.resources is defined and (_trigger.resources | length) > 0 and _trigger.resources[0].spec is defined and _trigger.resources[0].spec.broker is defined)
+            else ''
+          }}
+        _trigger_current_subscriber_name: >-
+          {{
+            (_trigger.resources[0].spec.subscriber.ref.name)
+            if (_trigger.resources is defined and (_trigger.resources | length) > 0
+                and _trigger.resources[0].spec is defined
+                and _trigger.resources[0].spec.subscriber is defined
+                and _trigger.resources[0].spec.subscriber.ref is defined
+                and _trigger.resources[0].spec.subscriber.ref.name is defined)
+            else ''
+          }}
+        _trigger_current_subscriber_api: >-
+          {{
+            (_trigger.resources[0].spec.subscriber.ref.apiVersion)
+            if (_trigger.resources is defined and (_trigger.resources | length) > 0
+                and _trigger.resources[0].spec is defined
+                and _trigger.resources[0].spec.subscriber is defined
+                and _trigger.resources[0].spec.subscriber.ref is defined
+                and _trigger.resources[0].spec.subscriber.ref.apiVersion is defined)
+            else ''
+          }}
+        _trigger_current_subscriber_kind: >-
+          {{
+            (_trigger.resources[0].spec.subscriber.ref.kind)
+            if (_trigger.resources is defined and (_trigger.resources | length) > 0
+                and _trigger.resources[0].spec is defined
+                and _trigger.resources[0].spec.subscriber is defined
+                and _trigger.resources[0].spec.subscriber.ref is defined
+                and _trigger.resources[0].spec.subscriber.ref.kind is defined)
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip Trigger"
+      ansible.builtin.set_fact:
+        knative_eventing_trigger_action: >-
+          {{
+            'install'
+            if (_trigger.resources is not defined or (_trigger.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (
+                _trigger_current_broker != knative_eventing_broker_name or
+                _trigger_current_subscriber_name != knative_eventing_receiver_name or
+                _trigger_current_subscriber_api != 'serving.knative.dev/v1' or
+                _trigger_current_subscriber_kind != 'Service'
+              )
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show Trigger decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_trigger_action }}"
+          namespace: "{{ knative_eventing_workloads_namespace }}"
+          trigger: "{{ knative_eventing_trigger_name }}"
+          broker: "{{ knative_eventing_broker_name }}"
+          subscriber: "ksvc/{{ knative_eventing_receiver_name }}"
+      changed_when: false
+
+    - name: "Apply Trigger (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: eventing.knative.dev/v1
+          kind: Trigger
+          metadata:
+            name: "{{ knative_eventing_trigger_name }}"
+            namespace: "{{ knative_eventing_workloads_namespace }}"
+          spec:
+            broker: "{{ knative_eventing_broker_name }}"
+            subscriber:
+              ref:
+                apiVersion: serving.knative.dev/v1
+                kind: Service
+                name: "{{ knative_eventing_receiver_name }}"
+      when: knative_eventing_trigger_action in ['install', 'upgrade']
+
+    - name: "Wait for Trigger to be Ready"
+      kubernetes.core.k8s_info:
+        api_version: eventing.knative.dev/v1
+        kind: Trigger
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_trigger_name }}"
+      register: _trigger_post
+      until: >-
+        (_trigger_post.resources | length) > 0 and
+        (
+          (
+            _trigger_post.resources[0].status.conditions | default([])
+            | selectattr('type','equalto','Ready')
+            | selectattr('status','equalto','True')
+            | list
+            | length
+          ) > 0
+        )
+      retries: "{{ knative_eventing_defaults_verify_retries }}"
+      delay: "{{ knative_eventing_defaults_verify_delay }}"
+      changed_when: false
+
+    # ---------------------------------------------------------
+    # PingSource payload handling (definitive): dataBase64
+    #
+    # Upstream supports dataBase64 as a base64-encoded string payload.
+    # data and dataBase64 are mutually exclusive. :contentReference[oaicite:1]{index=1}
+    #
+    # Your cluster's validator clearly attempts to parse the decoded bytes
+    # as JSON when contentType=application/json, so we guarantee decoded bytes
+    # are valid JSON (not escaped JSON).
+    # ---------------------------------------------------------
+
+    - name: "Initialize payload objects"
+      ansible.builtin.set_fact:
+        _ps_15m_payload_obj: {}
+        _ps_daily_payload_obj: {}
+      changed_when: false
+
+    # 15m payload normalization
+    - name: "15m payload | if already mapping/list, keep as-is; else try parse as JSON; else try unescape-then-parse; else wrap in {message: ...}"
+      block:
+        - name: "15m payload | mapping/list passthrough"
+          ansible.builtin.set_fact:
+            _ps_15m_payload_obj: "{{ knative_eventing_pingsource_15m_data }}"
+          when: "knative_eventing_pingsource_15m_data is mapping or knative_eventing_pingsource_15m_data is sequence"
+          changed_when: false
+
+        - name: "15m payload | parse JSON string"
+          ansible.builtin.set_fact:
+            _ps_15m_payload_obj: "{{ knative_eventing_pingsource_15m_data | from_json }}"
+          when: "knative_eventing_pingsource_15m_data is string and not (knative_eventing_pingsource_15m_data is mapping) and not (knative_eventing_pingsource_15m_data is sequence)"
+          changed_when: false
+      rescue:
+        - name: "15m payload | try unescape then parse"
+          block:
+            - ansible.builtin.set_fact:
+                _ps_15m_payload_obj: "{{ (knative_eventing_pingsource_15m_data | regex_replace('\\\\\"','\"')) | from_json }}"
+              changed_when: false
+          rescue:
+            - name: "15m payload | wrap raw string"
+              ansible.builtin.set_fact:
+                _ps_15m_payload_obj:
+                  message: "{{ knative_eventing_pingsource_15m_data }}"
+              changed_when: false
+
+    # daily payload normalization
+    - name: "Daily payload | if already mapping/list, keep as-is; else try parse as JSON; else try unescape-then-parse; else wrap in {message: ...}"
+      block:
+        - name: "Daily payload | mapping/list passthrough"
+          ansible.builtin.set_fact:
+            _ps_daily_payload_obj: "{{ knative_eventing_pingsource_daily_data }}"
+          when: "knative_eventing_pingsource_daily_data is mapping or knative_eventing_pingsource_daily_data is sequence"
+          changed_when: false
+
+        - name: "Daily payload | parse JSON string"
+          ansible.builtin.set_fact:
+            _ps_daily_payload_obj: "{{ knative_eventing_pingsource_daily_data | from_json }}"
+          when: "knative_eventing_pingsource_daily_data is string and not (knative_eventing_pingsource_daily_data is mapping) and not (knative_eventing_pingsource_daily_data is sequence)"
+          changed_when: false
+      rescue:
+        - name: "Daily payload | try unescape then parse"
+          block:
+            - ansible.builtin.set_fact:
+                _ps_daily_payload_obj: "{{ (knative_eventing_pingsource_daily_data | regex_replace('\\\\\"','\"')) | from_json }}"
+              changed_when: false
+          rescue:
+            - name: "Daily payload | wrap raw string"
+              ansible.builtin.set_fact:
+                _ps_daily_payload_obj:
+                  message: "{{ knative_eventing_pingsource_daily_data }}"
+              changed_when: false
+
+    - name: "Compute normalized JSON payload strings"
+      ansible.builtin.set_fact:
+        _ps_15m_payload_json: "{{ _ps_15m_payload_obj | to_json }}"
+        _ps_daily_payload_json: "{{ _ps_daily_payload_obj | to_json }}"
+      changed_when: false
+
+    - name: "Compute dataBase64 values from normalized JSON"
+      ansible.builtin.set_fact:
+        _ps_15m_data_base64: "{{ _ps_15m_payload_json | b64encode }}"
+        _ps_daily_data_base64: "{{ _ps_daily_payload_json | b64encode }}"
+      changed_when: false
+
+    - name: "Show normalized payload types (for troubleshooting; should be mapping -> JSON -> base64)"
+      ansible.builtin.debug:
+        msg:
+          contentType: "{{ knative_eventing_pingsource_content_type }}"
+          ps_15m_payload_obj_type: "{{ _ps_15m_payload_obj | type_debug }}"
+          ps_15m_payload_json_preview: "{{ _ps_15m_payload_json }}"
+          ps_daily_payload_obj_type: "{{ _ps_daily_payload_obj | type_debug }}"
+          ps_daily_payload_json_preview: "{{ _ps_daily_payload_json }}"
+      changed_when: false
+
+    # -------------------------
+    # PingSource: 15-minute
+    # -------------------------
+
+    - name: "Check if PingSource (15m) exists"
+      kubernetes.core.k8s_info:
+        api_version: sources.knative.dev/v1
+        kind: PingSource
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_pingsource_15m_name }}"
+      register: _ps_15m
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract current PingSource (15m) signature (if present)"
+      ansible.builtin.set_fact:
+        _ps_15m_current_schedule: >-
+          {{
+            (_ps_15m.resources[0].spec.schedule)
+            if (_ps_15m.resources is defined and (_ps_15m.resources | length) > 0 and _ps_15m.resources[0].spec is defined and _ps_15m.resources[0].spec.schedule is defined)
+            else ''
+          }}
+        _ps_15m_current_content_type: >-
+          {{
+            (_ps_15m.resources[0].spec.contentType)
+            if (_ps_15m.resources is defined and (_ps_15m.resources | length) > 0 and _ps_15m.resources[0].spec is defined and _ps_15m.resources[0].spec.contentType is defined)
+            else ''
+          }}
+        _ps_15m_current_data_base64: >-
+          {{
+            (_ps_15m.resources[0].spec.dataBase64)
+            if (_ps_15m.resources is defined and (_ps_15m.resources | length) > 0 and _ps_15m.resources[0].spec is defined and _ps_15m.resources[0].spec.dataBase64 is defined)
+            else ''
+          }}
+        _ps_15m_current_sink_kind: >-
+          {{
+            (_ps_15m.resources[0].spec.sink.ref.kind)
+            if (_ps_15m.resources is defined and (_ps_15m.resources | length) > 0
+                and _ps_15m.resources[0].spec is defined
+                and _ps_15m.resources[0].spec.sink is defined
+                and _ps_15m.resources[0].spec.sink.ref is defined
+                and _ps_15m.resources[0].spec.sink.ref.kind is defined)
+            else ''
+          }}
+        _ps_15m_current_sink_name: >-
+          {{
+            (_ps_15m.resources[0].spec.sink.ref.name)
+            if (_ps_15m.resources is defined and (_ps_15m.resources | length) > 0
+                and _ps_15m.resources[0].spec is defined
+                and _ps_15m.resources[0].spec.sink is defined
+                and _ps_15m.resources[0].spec.sink.ref is defined
+                and _ps_15m.resources[0].spec.sink.ref.name is defined)
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip PingSource (15m)"
+      ansible.builtin.set_fact:
+        knative_eventing_ps_15m_action: >-
+          {{
+            'install'
+            if (_ps_15m.resources is not defined or (_ps_15m.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (
+                _ps_15m_current_schedule != knative_eventing_pingsource_15m_schedule or
+                _ps_15m_current_content_type != knative_eventing_pingsource_content_type or
+                _ps_15m_current_data_base64 != _ps_15m_data_base64 or
+                _ps_15m_current_sink_kind != 'Broker' or
+                _ps_15m_current_sink_name != knative_eventing_broker_name
+              )
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show PingSource (15m) decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_ps_15m_action }}"
+          name: "{{ knative_eventing_pingsource_15m_name }}"
+          schedule: "{{ knative_eventing_pingsource_15m_schedule }}"
+          sink: "broker/{{ knative_eventing_broker_name }}"
+          contentType: "{{ knative_eventing_pingsource_content_type }}"
+          uses: "spec.dataBase64"
+      changed_when: false
+
+    - name: "Apply PingSource (15m) (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: sources.knative.dev/v1
+          kind: PingSource
+          metadata:
+            name: "{{ knative_eventing_pingsource_15m_name }}"
+            namespace: "{{ knative_eventing_workloads_namespace }}"
+          spec:
+            schedule: "{{ knative_eventing_pingsource_15m_schedule }}"
+            contentType: "{{ knative_eventing_pingsource_content_type }}"
+            dataBase64: "{{ _ps_15m_data_base64 }}"
+            sink:
+              ref:
+                apiVersion: eventing.knative.dev/v1
+                kind: Broker
+                name: "{{ knative_eventing_broker_name }}"
+      when: knative_eventing_ps_15m_action in ['install', 'upgrade']
+
+    - name: "Wait for PingSource (15m) to be Ready"
+      kubernetes.core.k8s_info:
+        api_version: sources.knative.dev/v1
+        kind: PingSource
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_pingsource_15m_name }}"
+      register: _ps_15m_post
+      until: >-
+        (_ps_15m_post.resources | length) > 0 and
+        (
+          (
+            _ps_15m_post.resources[0].status.conditions | default([])
+            | selectattr('type','equalto','Ready')
+            | selectattr('status','equalto','True')
+            | list
+            | length
+          ) > 0
+        )
+      retries: "{{ knative_eventing_defaults_verify_retries }}"
+      delay: "{{ knative_eventing_defaults_verify_delay }}"
+      changed_when: false
+
+    # -------------------------
+    # PingSource: daily
+    # -------------------------
+
+    - name: "Check if PingSource (daily) exists"
+      kubernetes.core.k8s_info:
+        api_version: sources.knative.dev/v1
+        kind: PingSource
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_pingsource_daily_name }}"
+      register: _ps_daily
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Extract current PingSource (daily) signature (if present)"
+      ansible.builtin.set_fact:
+        _ps_daily_current_schedule: >-
+          {{
+            (_ps_daily.resources[0].spec.schedule)
+            if (_ps_daily.resources is defined and (_ps_daily.resources | length) > 0 and _ps_daily.resources[0].spec is defined and _ps_daily.resources[0].spec.schedule is defined)
+            else ''
+          }}
+        _ps_daily_current_content_type: >-
+          {{
+            (_ps_daily.resources[0].spec.contentType)
+            if (_ps_daily.resources is defined and (_ps_daily.resources | length) > 0 and _ps_daily.resources[0].spec is defined and _ps_daily.resources[0].spec.contentType is defined)
+            else ''
+          }}
+        _ps_daily_current_data_base64: >-
+          {{
+            (_ps_daily.resources[0].spec.dataBase64)
+            if (_ps_daily.resources is defined and (_ps_daily.resources | length) > 0 and _ps_daily.resources[0].spec is defined and _ps_daily.resources[0].spec.dataBase64 is defined)
+            else ''
+          }}
+        _ps_daily_current_sink_kind: >-
+          {{
+            (_ps_daily.resources[0].spec.sink.ref.kind)
+            if (_ps_daily.resources is defined and (_ps_daily.resources | length) > 0
+                and _ps_daily.resources[0].spec is defined
+                and _ps_daily.resources[0].spec.sink is defined
+                and _ps_daily.resources[0].spec.sink.ref is defined
+                and _ps_daily.resources[0].spec.sink.ref.kind is defined)
+            else ''
+          }}
+        _ps_daily_current_sink_name: >-
+          {{
+            (_ps_daily.resources[0].spec.sink.ref.name)
+            if (_ps_daily.resources is defined and (_ps_daily.resources | length) > 0
+                and _ps_daily.resources[0].spec is defined
+                and _ps_daily.resources[0].spec.sink is defined
+                and _ps_daily.resources[0].spec.sink.ref is defined
+                and _ps_daily.resources[0].spec.sink.ref.name is defined)
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip PingSource (daily)"
+      ansible.builtin.set_fact:
+        knative_eventing_ps_daily_action: >-
+          {{
+            'install'
+            if (_ps_daily.resources is not defined or (_ps_daily.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (
+                _ps_daily_current_schedule != knative_eventing_pingsource_daily_schedule or
+                _ps_daily_current_content_type != knative_eventing_pingsource_content_type or
+                _ps_daily_current_data_base64 != _ps_daily_data_base64 or
+                _ps_daily_current_sink_kind != 'Broker' or
+                _ps_daily_current_sink_name != knative_eventing_broker_name
+              )
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show PingSource (daily) decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_ps_daily_action }}"
+          name: "{{ knative_eventing_pingsource_daily_name }}"
+          schedule: "{{ knative_eventing_pingsource_daily_schedule }}"
+          sink: "broker/{{ knative_eventing_broker_name }}"
+          contentType: "{{ knative_eventing_pingsource_content_type }}"
+          uses: "spec.dataBase64"
+      changed_when: false
+
+    - name: "Apply PingSource (daily) (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: sources.knative.dev/v1
+          kind: PingSource
+          metadata:
+            name: "{{ knative_eventing_pingsource_daily_name }}"
+            namespace: "{{ knative_eventing_workloads_namespace }}"
+          spec:
+            schedule: "{{ knative_eventing_pingsource_daily_schedule }}"
+            contentType: "{{ knative_eventing_pingsource_content_type }}"
+            dataBase64: "{{ _ps_daily_data_base64 }}"
+            sink:
+              ref:
+                apiVersion: eventing.knative.dev/v1
+                kind: Broker
+                name: "{{ knative_eventing_broker_name }}"
+      when: knative_eventing_ps_daily_action in ['install', 'upgrade']
+
+    - name: "Wait for PingSource (daily) to be Ready"
+      kubernetes.core.k8s_info:
+        api_version: sources.knative.dev/v1
+        kind: PingSource
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_pingsource_daily_name }}"
+      register: _ps_daily_post
+      until: >-
+        (_ps_daily_post.resources | length) > 0 and
+        (
+          (
+            _ps_daily_post.resources[0].status.conditions | default([])
+            | selectattr('type','equalto','Ready')
+            | selectattr('status','equalto','True')
+            | list
+            | length
+          ) > 0
+        )
+      retries: "{{ knative_eventing_defaults_verify_retries }}"
+      delay: "{{ knative_eventing_defaults_verify_delay }}"
+      changed_when: false
+
+    # -------------------------
+    # Final assertions
+    # -------------------------
+
+    - name: "Assert Broker has a URL"
+      ansible.builtin.assert:
+        that:
+          - "_broker_post.resources[0].status.address.url is defined"
+          - "(_broker_post.resources[0].status.address.url | length) > 0"
+        fail_msg: "Broker is Ready but does not have a status.address.url."
+        success_msg: "Broker is Ready and addressable."
+
+    - name: "Assert Trigger points to the receiver Knative Service"
+      ansible.builtin.assert:
+        that:
+          - "_trigger_post.resources[0].spec.broker == knative_eventing_broker_name"
+          - "_trigger_post.resources[0].spec.subscriber.ref.apiVersion == 'serving.knative.dev/v1'"
+          - "_trigger_post.resources[0].spec.subscriber.ref.kind == 'Service'"
+          - "_trigger_post.resources[0].spec.subscriber.ref.name == knative_eventing_receiver_name"
+        fail_msg: "Trigger is Ready but does not match the desired broker/subscriber."
+        success_msg: "Trigger is Ready and wired to the receiver."
+

@@ -1,0 +1,170 @@
+---
+- name: "Knative Eventing receivers | role defaults for Kubernetes modules"
+  module_defaults:
+    kubernetes.core.k8s:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+    kubernetes.core.k8s_info:
+      kubeconfig: "{{ knative_kubeconfig_path | default('/etc/kubernetes/admin.conf') }}"
+  block:
+
+    # -------------------------
+    # Ensure namespace exists
+    # -------------------------
+
+    - name: "Check if workloads namespace exists"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_workloads_namespace }}"
+      register: _ns
+      changed_when: false
+
+    - name: "Decide whether to create workloads namespace"
+      ansible.builtin.set_fact:
+        _ns_action: "{{ 'install' if (_ns.resources | length == 0) else 'skip' }}"
+      changed_when: false
+
+    - name: "Create workloads namespace (only if missing)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ knative_eventing_workloads_namespace }}"
+      when: _ns_action == 'install'
+
+    - name: "Verify workloads namespace exists"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ knative_eventing_workloads_namespace }}"
+      register: _ns_post
+      until: "_ns_post.resources | length > 0"
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    # -------------------------
+    # Receiver Knative Service
+    # -------------------------
+
+    - name: "Check if receiver Knative Service exists"
+      kubernetes.core.k8s_info:
+        api_version: serving.knative.dev/v1
+        kind: Service
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_receiver_name }}"
+      register: _ksvc
+      ignore_errors: true
+      changed_when: false
+
+    - name: "Compute desired receiver spec signature"
+      ansible.builtin.set_fact:
+        _receiver_desired_image: "{{ knative_eventing_receiver_image }}"
+      changed_when: false
+
+    - name: "Extract current receiver image (if present)"
+      ansible.builtin.set_fact:
+        _receiver_current_image: >-
+          {{
+            (_ksvc.resources[0].spec.template.spec.containers[0].image)
+            if (_ksvc.resources is defined and (_ksvc.resources | length) > 0
+                and _ksvc.resources[0].spec is defined
+                and _ksvc.resources[0].spec.template is defined
+                and _ksvc.resources[0].spec.template.spec is defined
+                and _ksvc.resources[0].spec.template.spec.containers is defined
+                and (_ksvc.resources[0].spec.template.spec.containers | length) > 0
+                and _ksvc.resources[0].spec.template.spec.containers[0].image is defined)
+            else ''
+          }}
+      changed_when: false
+
+    - name: "Decide whether to install/upgrade/skip receiver"
+      ansible.builtin.set_fact:
+        knative_eventing_receiver_action: >-
+          {{
+            'install'
+            if (_ksvc.resources is not defined or (_ksvc.resources | length) == 0)
+            else
+            (
+              'upgrade'
+              if (_receiver_current_image != _receiver_desired_image)
+              else
+              'skip'
+            )
+          }}
+      changed_when: false
+
+    - name: "Show receiver decision"
+      ansible.builtin.debug:
+        msg:
+          action: "{{ knative_eventing_receiver_action }}"
+          namespace: "{{ knative_eventing_workloads_namespace }}"
+          name: "{{ knative_eventing_receiver_name }}"
+          desired:
+            image: "{{ _receiver_desired_image }}"
+          current:
+            image: "{{ _receiver_current_image }}"
+      changed_when: false
+
+    - name: "Apply receiver Knative Service (install/upgrade)"
+      kubernetes.core.k8s:
+        state: present
+        resource_definition:
+          apiVersion: serving.knative.dev/v1
+          kind: Service
+          metadata:
+            name: "{{ knative_eventing_receiver_name }}"
+            namespace: "{{ knative_eventing_workloads_namespace }}"
+          spec:
+            template:
+              metadata:
+                annotations:
+                  autoscaling.knative.dev/minScale: "1"
+              spec:
+                containers:
+                  - name: user-container
+                    image: "{{ _receiver_desired_image }}"
+                    # IMPORTANT:
+                    # Do NOT specify ports.containerPort here.
+                    # Knative defaults to 8080 and avoids the common YAML/Jinja numeric-string pitfall
+                    # that causes webhook rejection (expects int32).
+      when: knative_eventing_receiver_action in ['install', 'upgrade']
+
+    # -------------------------
+    # Verification (always)
+    # -------------------------
+
+    - name: "Wait for receiver Knative Service to become Ready"
+      kubernetes.core.k8s_info:
+        api_version: serving.knative.dev/v1
+        kind: Service
+        namespace: "{{ knative_eventing_workloads_namespace }}"
+        name: "{{ knative_eventing_receiver_name }}"
+      register: _ksvc_post
+      until: >-
+        (_ksvc_post.resources | length) > 0 and
+        (
+          (
+            _ksvc_post.resources[0].status.conditions | default([])
+            | selectattr('type','equalto','Ready')
+            | selectattr('status','equalto','True')
+            | list
+            | length
+          ) > 0
+        )
+      retries: "{{ knative_eventing_receiver_verify_retries }}"
+      delay: "{{ knative_eventing_receiver_verify_delay }}"
+      changed_when: false
+
+    - name: "Assert receiver spec matches desired (image)"
+      ansible.builtin.assert:
+        that:
+          - "_ksvc_post.resources[0].spec.template.spec.containers[0].image == _receiver_desired_image"
+        fail_msg: >-
+          Receiver Knative Service is Ready, but image does not match desired.
+          Desired image={{ _receiver_desired_image }}.
+          Found image={{ _ksvc_post.resources[0].spec.template.spec.containers[0].image | default('missing') }}.
+        success_msg: "Receiver Knative Service is Ready and configured as expected (image matches)."
+

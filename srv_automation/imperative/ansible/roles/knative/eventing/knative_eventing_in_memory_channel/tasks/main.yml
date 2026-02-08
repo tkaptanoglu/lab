@@ -60,7 +60,7 @@
             else
             (
               'upgrade'
-              if (knative_eventing_imc_installed_version != knative_eventing_desired_version)
+              if ((knative_eventing_imc_installed_version | regex_replace('^v','')) != (knative_eventing_desired_version | regex_replace('^v','')))
               else
               'skip'
             )

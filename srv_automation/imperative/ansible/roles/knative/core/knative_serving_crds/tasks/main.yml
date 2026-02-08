@@ -69,7 +69,7 @@
             else
             (
               'upgrade'
-              if (knative_serving_installed_version_norm != knative_serving_desired_version)
+              if ((knative_serving_installed_version | regex_replace('^v','')) != (knative_serving_desired_version | regex_replace('^v','')))
               else
               'skip'
             )

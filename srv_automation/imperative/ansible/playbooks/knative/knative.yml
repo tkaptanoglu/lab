@@ -9,3 +9,10 @@
     - role: roles/knative/core/knative_serving_core
     - role: roles/knative/ingress/knative_net_kourier
     - role: roles/knative/ingress/knative_serving_ingressclass_kourier
+    - role: roles/knative/eventing/knative_eventing_crds
+    - role: roles/knative/eventing/knative_eventing_core
+    - role: roles/knative/eventing/knative_eventing_in_memory_channel
+    - role: roles/knative/eventing/knative_eventing_mt_channel_broker
+    - role: roles/knative/eventing/knative_eventing_post_install
+    - role: roles/knative/eventing/knative_eventing_receivers
+    - role: roles/knative/eventing/knative_eventing_defaults

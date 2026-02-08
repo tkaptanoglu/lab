@@ -1,0 +1,15 @@
+---
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+# Where to deploy the receiver + broker + triggers + sources
+knative_eventing_workloads_namespace: "eventing-workloads"
+
+# Receiver (Knative Service) that prints CloudEvents to logs
+knative_eventing_receiver_name: "event-display"
+knative_eventing_receiver_image: "gcr.io/knative-releases/knative.dev/eventing/cmd/event_display"
+knative_eventing_receiver_container_port: 8080
+
+# Verification tuning
+knative_eventing_receiver_verify_retries: 60
+knative_eventing_receiver_verify_delay: 2
+

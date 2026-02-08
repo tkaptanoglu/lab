@@ -1,0 +1,28 @@
+---
+knative_kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+# Same namespace as receiver role
+knative_eventing_workloads_namespace: "eventing-workloads"
+
+# Broker + Trigger wiring
+knative_eventing_broker_name: "default"
+knative_eventing_trigger_name: "all-to-event-display"
+knative_eventing_receiver_name: "event-display"
+
+# PingSources (timer-driven)
+knative_eventing_pingsource_15m_name: "ping-15m"
+knative_eventing_pingsource_daily_name: "ping-daily"
+
+# Schedules
+knative_eventing_pingsource_15m_schedule: "*/15 * * * *"
+knative_eventing_pingsource_daily_schedule: "0 3 * * *"   # daily at 03:00
+
+# Payloads
+knative_eventing_pingsource_15m_data: '{"message":"hello from ping-15m"}'
+knative_eventing_pingsource_daily_data: '{"message":"hello from ping-daily"}'
+knative_eventing_pingsource_content_type: "application/json"
+
+# Verification tuning
+knative_eventing_defaults_verify_retries: 90
+knative_eventing_defaults_verify_delay: 2
+
