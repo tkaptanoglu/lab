@@ -31,7 +31,7 @@
         # Optional: background artifact updates (off by default)
         falco_enable_artifact_follow: false
     - role: roles/security/ids/falco/email_alerts_setup
-    - role: roles/security/patching
+    - role: roles/security/patching/apt_upgrade_daily
       vars:
         server_autopatch_origins:
           - "o=Ubuntu,a=${distro_codename}-security"

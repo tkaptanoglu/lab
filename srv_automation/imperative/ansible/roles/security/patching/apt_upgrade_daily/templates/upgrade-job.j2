@@ -1,0 +1,3 @@
+# Managed by Ansible — Do not edit manually
+{{ auto_apt_upgrade_minute }} {{ auto_apt_upgrade_hour }} * * * /usr/bin/apt update && /usr/bin/apt upgrade -y >> {{ auto_apt_upgrade_log_file }} 2>&1 {% if auto_apt_upgrade_enable_reboot %}&& /usr/bin/test -f /var/run/reboot-required && /sbin/reboot{% endif %}
+

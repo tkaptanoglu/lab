@@ -1,0 +1,11 @@
+---
+# Schedule (24h clock)
+auto_apt_upgrade_hour: "4"
+auto_apt_upgrade_minute: "5"
+
+# Logging
+auto_apt_upgrade_log_file: "/var/log/cron-apt.log"
+
+# If true, reboot automatically when /var/run/reboot-required exists
+auto_apt_upgrade_enable_reboot: false
+
