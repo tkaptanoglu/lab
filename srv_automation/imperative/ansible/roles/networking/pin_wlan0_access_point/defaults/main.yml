@@ -1,0 +1,18 @@
+---
+# defaults file for pin_wlan0_access_point
+
+netplan_cloud_init_file: /etc/netplan/50-cloud-init.yaml
+
+# How long to wait for the host to come back after reboot (seconds)
+pin_wlan0_reboot_timeout: 600
+
+# How often (seconds) Ansible should attempt reconnect checks during reboot wait
+# (Ansible's reboot module checks repeatedly; this is not a strict "every minute",
+# but it will keep trying until timeout.)
+pin_wlan0_reboot_connect_timeout: 5
+pin_wlan0_reboot_post_delay: 10
+
+# Name of the connection that netplan typically generates for NM
+# (we’ll also search if this exact name is not present)
+pin_wlan0_nm_connection_name: "netplan-wlan0-{{ wlan0_ssid }}"
+

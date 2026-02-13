@@ -1,0 +1,145 @@
+---
+- name: Ensure required packages are installed
+  ansible.builtin.apt:
+    name: "{{ networkmanager_migrate_packages }}"
+    state: present
+    update_cache: true
+
+- name: Ensure NetworkManager is enabled and started (pre-warm)
+  ansible.builtin.systemd:
+    name: NetworkManager
+    enabled: true
+    state: started
+
+- name: Write netplan override forcing NetworkManager renderer
+  ansible.builtin.template:
+    src: 10-netplan-networkmanager.yaml.j2
+    dest: "{{ networkmanager_migrate_netplan_override_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Netplan generate (sanity)
+  ansible.builtin.command: netplan generate
+  register: netplan_generate
+  changed_when: false
+
+# --- Rollback safety net (armed before we cut over) ---
+- name: Install rollback script
+  ansible.builtin.copy:
+    src: nm-rollback.sh
+    dest: /usr/local/sbin/nm-rollback.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install rollback systemd unit
+  ansible.builtin.template:
+    src: nm-migrate-rollback.service.j2
+    dest: "/etc/systemd/system/{{ networkmanager_migrate_rollback_service_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: systemd daemon-reload
+
+- name: Install rollback systemd timer
+  ansible.builtin.template:
+    src: nm-migrate-rollback.timer.j2
+    dest: "/etc/systemd/system/{{ networkmanager_migrate_rollback_timer_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: systemd daemon-reload
+
+- name: Flush handlers (daemon-reload before enabling timers)
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable rollback timer (armed)
+  ansible.builtin.systemd:
+    name: "{{ networkmanager_migrate_rollback_timer_name }}"
+    enabled: true
+    state: started
+
+# --- Cutover: run locally on the target using systemd-run so it survives SSH drop ---
+- name: Install cutover script (runs locally, survives SSH drop)
+  ansible.builtin.copy:
+    src: nm-cutover.sh
+    dest: /usr/local/sbin/nm-cutover.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Trigger cutover via systemd-run (single command; may drop SSH)
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --unit=nm-cutover
+      - --collect
+      - /usr/local/sbin/nm-cutover.sh
+  register: cutover_cmd
+  changed_when: true
+  # The SSH session may die immediately after the cutover starts; don't fail the play for that.
+  ignore_unreachable: true
+  failed_when: false
+
+# After we trigger cutover, we must wait from the controller (local machine) until SSH is back.
+- name: Wait for SSH to come back after cutover
+  ansible.builtin.wait_for_connection:
+    timeout: "{{ networkmanager_migrate_wait_for_connection_timeout }}"
+    delay: "{{ networkmanager_migrate_wait_for_connection_delay }}"
+
+# --- Verification with retries (don’t fail if NM takes a moment to become active) ---
+- name: Verify NetworkManager active (retry)
+  ansible.builtin.command: systemctl is-active NetworkManager
+  register: nm_active
+  changed_when: false
+  retries: "{{ networkmanager_migrate_verify_retries }}"
+  delay: "{{ networkmanager_migrate_verify_delay }}"
+  until: nm_active.stdout == "active"
+
+- name: Verify interface is connected via NetworkManager (retry)
+  ansible.builtin.command: nmcli -t -f DEVICE,STATE dev status
+  register: nmcli_dev
+  changed_when: false
+  retries: "{{ networkmanager_migrate_verify_retries }}"
+  delay: "{{ networkmanager_migrate_verify_delay }}"
+  until: >
+    (
+      (networkmanager_migrate_verify_iface ~ ":connected") in nmcli_dev.stdout
+      or (networkmanager_migrate_verify_iface ~ ":connecting") in nmcli_dev.stdout
+    )
+
+# Optional: assert networkd is inactive (this is informational; don’t fail if it’s still stopping)
+- name: Check systemd-networkd is inactive (informational)
+  ansible.builtin.command: systemctl is-active systemd-networkd
+  register: networkd_state
+  changed_when: false
+  failed_when: false
+
+# --- Disarm rollback safety net now that we’ve verified success ---
+- name: Disable rollback timer (disarm)
+  ansible.builtin.systemd:
+    name: "{{ networkmanager_migrate_rollback_timer_name }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Disable rollback service (disarm)
+  ansible.builtin.systemd:
+    name: "{{ networkmanager_migrate_rollback_service_name }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Remove rollback unit/timer files
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop:
+    - "{{ networkmanager_migrate_rollback_service_name }}"
+    - "{{ networkmanager_migrate_rollback_timer_name }}"
+  notify: systemd daemon-reload
+
+- name: Flush handlers (final daemon-reload)
+  ansible.builtin.meta: flush_handlers
+

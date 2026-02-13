@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BOOTSTRAP="{{ kafka_bootstrap_servers }}"
+TOPIC="{{ kafka_topic }}"
+PRIO="{{ log_priority }}"
+MAX_LINES="{{ max_lines }}"
+
+HOST="$(hostname -f 2>/dev/null || hostname)"
+TS="$(date -Iseconds)"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+SINCE="24 hours ago"
+
+journalctl --since "$SINCE" -p "$PRIO" --no-pager | tail -n "$MAX_LINES" > "$tmpdir/journal.txt" || true
+journalctl --since "$SINCE" -k -p "$PRIO" --no-pager | tail -n "$MAX_LINES" > "$tmpdir/kernel.txt" || true
+systemctl --failed --no-pager > "$tmpdir/failed-units.txt" || true
+dmesg --level=err,warn --ctime | tail -n 400 > "$tmpdir/dmesg.txt"
+
+payload="$(cat <<EOF
+=== journalctl ($PRIO) ===
+$(cat "$tmpdir/journal.txt")
+
+=== kernel ($PRIO) ===
+$(cat "$tmpdir/kernel.txt")
+
+=== systemctl --failed ===
+$(cat "$tmpdir/failed-units.txt")
+
+=== dmesg (tail) ===
+$(cat "$tmpdir/dmesg.txt")
+EOF
+)"
+
+json="$(jq -n \
+    --arg server "$HOST" \
+    --arg datetime "$TS" \
+    --arg payload "$payload" \
+    '{server:$server, datetime:$datetime, payload:$payload}'
+)"
+
+printf '%s\n' "$json" | kcat -P -b "$BOOTSTRAP" -t "$TOPIC"
+

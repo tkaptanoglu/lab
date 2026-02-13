@@ -1,0 +1,12 @@
+# Managed by Ansible (networkmanager_migrate). Do not edit.
+[Unit]
+Description=Timer to rollback NetworkManager cutover if not confirmed
+
+[Timer]
+OnActiveSec={{ networkmanager_migrate_rollback_minutes }}min
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+

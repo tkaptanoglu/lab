@@ -1,0 +1,10 @@
+# Managed by Ansible (networkmanager_migrate). Do not edit.
+[Unit]
+Description=Rollback NetworkManager cutover back to systemd-networkd (safety net)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nm-rollback.sh
+

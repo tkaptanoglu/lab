@@ -1,0 +1,36 @@
+---
+# Packages required for NetworkManager to manage Wi-Fi on Ubuntu
+networkmanager_migrate_packages:
+  - network-manager
+  - netplan.io
+  - wireless-tools
+  - wpasupplicant
+
+# Netplan override to force NM renderer
+networkmanager_migrate_netplan_override_path: /etc/netplan/10-networkmanager-override.yaml
+
+# Optional: the interface you expect NM to manage (used only for verification)
+networkmanager_migrate_verify_iface: wlan0
+
+# Rollback safety net: if we never confirm success, rollback will fire after this many minutes.
+networkmanager_migrate_rollback_minutes: 10
+
+# Units we want to stop/disable (these are the ones that tend to drop SSH)
+networkmanager_migrate_disable_units:
+  - systemd-networkd.service
+  - systemd-networkd.socket
+  - systemd-networkd-wait-online.service
+  - netplan-wpa-wlan0.service
+
+# How long to wait for SSH to come back after cutover
+networkmanager_migrate_wait_for_connection_timeout: 600
+networkmanager_migrate_wait_for_connection_delay: 2
+
+# How long to retry post-cutover verification
+networkmanager_migrate_verify_retries: 60
+networkmanager_migrate_verify_delay: 2
+
+# Names for rollback unit/timer
+networkmanager_migrate_rollback_service_name: nm-migrate-rollback.service
+networkmanager_migrate_rollback_timer_name: nm-migrate-rollback.timer
+

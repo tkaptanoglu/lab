@@ -1,0 +1,266 @@
+---
+# Pin wlan0 to a specific AP BSSID by editing /etc/netplan/50-cloud-init.yaml in-place.
+# Key property: do NOT guess indentation. Derive "child indent" from existing SSID block.
+
+- name: Ensure required variables exist
+  ansible.builtin.assert:
+    that:
+      - wlan0_ssid is defined
+      - wlan0_ssid | length > 0
+      - wlan0_ap_bssid is defined
+      - wlan0_ap_bssid | length > 0
+      - vault_sudo_password is defined
+      - vault_sudo_password | length > 0
+    fail_msg: "Missing required vars: wlan0_ssid, wlan0_ap_bssid, vault_sudo_password"
+    success_msg: "All assertions passed"
+
+- name: Ensure become password is set from vault_sudo_password
+  ansible.builtin.set_fact:
+    ansible_become_password: "{{ vault_sudo_password }}"
+
+- name: Ensure netplan cloud-init file exists
+  ansible.builtin.stat:
+    path: /etc/netplan/50-cloud-init.yaml
+  register: netplan_cloud_init
+
+- name: Fail if /etc/netplan/50-cloud-init.yaml missing
+  ansible.builtin.fail:
+    msg: "/etc/netplan/50-cloud-init.yaml not found; refusing to proceed."
+  when: not netplan_cloud_init.stat.exists
+
+# We refuse to proceed unless the SSID key line exists (quoted or unquoted) exactly as a YAML key.
+- name: Find SSID key line for wlan0_ssid in /etc/netplan/50-cloud-init.yaml
+  ansible.builtin.command: >
+    bash -lc 'grep -m1 -n -E "^[[:space:]]*\"?{{ wlan0_ssid | regex_escape }}\"?[[:space:]]*:[[:space:]]*$" /etc/netplan/50-cloud-init.yaml || true'
+  register: ssid_grep
+  changed_when: false
+
+- name: Fail if SSID key line not found (we will not guess YAML structure)
+  ansible.builtin.fail:
+    msg: >
+      Could not find an SSID key line matching '{{ wlan0_ssid }}:' in /etc/netplan/50-cloud-init.yaml.
+      Refusing to edit YAML.
+  when: ssid_grep.stdout | trim == ""
+
+# Perform an in-place, SSID-block-scoped edit:
+# - Detect SSID key line by exact match
+# - Determine child indent by first non-empty/non-comment line under that SSID (must be more indented)
+# - Replace existing bssid line inside that SSID block, or insert one if absent
+# - Never touch other SSIDs
+- name: Pin wlan0 BSSID in /etc/netplan/50-cloud-init.yaml (derive indentation from existing SSID block)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    f=/etc/netplan/50-cloud-init.yaml
+    ssid="{{ wlan0_ssid }}"
+    bssid="{{ wlan0_ap_bssid }}"
+
+    tmp="$(mktemp)"
+    cp -a "$f" "${f}.bak.$(date +%s)"
+
+    awk -v SSID="$ssid" -v BSSID="$bssid" '
+      function ltrim(s) { sub(/^[ \t]+/, "", s); return s }
+      function indent_len(s,   m) { m=match(s, /^[ \t]*/); return RLENGTH }
+
+      BEGIN {
+        in_ssid = 0
+        ssid_indent = -1
+        child_indent = -1
+        bssid_done = 0
+      }
+
+      # match SSID YAML key line (quoted or unquoted), nothing else on line
+      $0 ~ "^[ \t]*\"?" SSID "\"?[ \t]*:[ \t]*$" {
+        # If we were somehow still in a previous SSID (shouldn’t happen), close it.
+        if (in_ssid && !bssid_done) {
+          if (child_indent < 0) child_indent = ssid_indent + 4
+          printf("%*s%s\n", child_indent, "", "bssid: \"" BSSID "\"")
+        }
+
+        in_ssid = 1
+        ssid_indent = indent_len($0)
+        child_indent = -1
+        bssid_done = 0
+        print $0
+        next
+      }
+
+      # When inside SSID block, determine child indent from first meaningful child line
+      in_ssid == 1 {
+        # blank/comment lines don’t define indentation; just print them
+        if ($0 ~ /^[ \t]*($|#)/) { print $0; next }
+
+        cur_indent = indent_len($0)
+
+        # If we haven’t determined child indent yet:
+        if (child_indent < 0) {
+          # If the next meaningful line is NOT more indented, SSID block is empty -> default +4
+          if (cur_indent <= ssid_indent) {
+            if (!bssid_done) {
+              child_indent = ssid_indent + 4
+              printf("%*s%s\n", child_indent, "", "bssid: \"" BSSID "\"")
+              bssid_done = 1
+            }
+            in_ssid = 0
+            # fall through to normal printing of this line outside the block
+          } else {
+            child_indent = cur_indent
+          }
+        }
+
+        # If block already ended in the branch above, handle line normally below
+        if (in_ssid == 0) {
+          # normal processing outside block
+        } else {
+          # We are still in SSID block
+          # If we hit a line that is not more indented than SSID key, block ended.
+          if (cur_indent <= ssid_indent) {
+            if (!bssid_done) {
+              if (child_indent < 0) child_indent = ssid_indent + 4
+              printf("%*s%s\n", child_indent, "", "bssid: \"" BSSID "\"")
+              bssid_done = 1
+            }
+            in_ssid = 0
+            # fall through to print this line normally outside block
+          } else {
+            # Within SSID children: replace any existing bssid line (any indent) with correct indent
+            if ($0 ~ "^[ \t]*bssid:[ \t]*") {
+              printf("%*s%s\n", child_indent, "", "bssid: \"" BSSID "\"")
+              bssid_done = 1
+              next
+            }
+            print $0
+            next
+          }
+        }
+      }
+
+      # Outside SSID block: print line as-is
+      {
+        print $0
+      }
+
+      END {
+        # If file ended while still in SSID block and we never inserted bssid, append it.
+        if (in_ssid && !bssid_done) {
+          if (child_indent < 0) child_indent = ssid_indent + 4
+          printf("%*s%s\n", child_indent, "", "bssid: \"" BSSID "\"")
+        }
+      }
+    ' "$f" > "$tmp"
+
+    # Replace atomically
+    install -m 0644 -o root -g root "$tmp" "$f"
+    rm -f "$tmp"
+  args:
+    executable: /bin/bash
+  become: true
+
+- name: Run netplan generate immediately (sanity)
+  ansible.builtin.command: netplan generate
+  become: true
+
+- name: Apply netplan
+  ansible.builtin.command: netplan apply
+  become: true
+
+- name: Reboot to ensure pinning persists across boot
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+  become: true
+
+- name: Wait for SSH to come back (max 10 minutes, check every minute)
+  ansible.builtin.wait_for_connection:
+    delay: 60
+    timeout: 600
+
+# Verify pinning via NetworkManager:
+# - Find active connection name on wlan0
+# - Read its 802-11-wireless.bssid
+# - Assert equals expected
+- name: Get active connection name for wlan0
+  ansible.builtin.command: >
+    bash -lc 'nmcli -t -f DEVICE,NAME connection show --active | awk -F: '"'"'$1=="wlan0"{print $2; exit}'"'"''
+  register: nm_active_wlan0
+  changed_when: false
+
+- name: Fail if wlan0 has no active NM connection after reboot
+  ansible.builtin.fail:
+    msg: "No active NetworkManager connection on wlan0 after reboot; cannot verify BSSID pin."
+  when: (nm_active_wlan0.stdout | trim) == ""
+
+- name: Read pinned BSSID from active wlan0 connection
+  ansible.builtin.command: >
+    bash -lc 'nmcli -g 802-11-wireless.bssid connection show "{{ nm_active_wlan0.stdout | trim }}"'
+  register: nm_bssid
+  changed_when: false
+
+- name: Verify BSSID is pinned as expected
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          nm_bssid.stdout
+          | trim
+          | regex_replace('\\\\:', ':')
+          | regex_replace('\\\\', '')
+          | lower
+        )
+        ==
+        (
+          wlan0_ap_bssid
+          | trim
+          | lower
+        )
+    fail_msg: >
+      BSSID pin verification failed.
+      Active connection: {{ nm_active_wlan0.stdout | trim }}
+      nmcli reports BSSID: '{{ nm_bssid.stdout | trim }}'
+      expected: '{{ wlan0_ap_bssid }}'
+    success_msg: "BSSID is pinned correctly on wlan0 active connection."
+
+################################################################################
+# Samba + Tailscale serve hijack remediation (as previously requested)
+################################################################################
+
+- name: Check if smbd is running
+  ansible.builtin.command: systemctl is-active smbd
+  register: smbd_active
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: If smbd is active, check tailscale serve status
+  ansible.builtin.command: tailscale serve status
+  register: ts_serve_status
+  changed_when: false
+  failed_when: false
+  become: true
+  when: (smbd_active.stdout | trim) == "active"
+
+- name: Detect tailscale SMB hijack (serve is publishing :445)
+  ansible.builtin.set_fact:
+    _tailscale_hijacking_445: "{{ (ts_serve_status.stdout is search('(:445\\b)')) | bool }}"
+  when: (smbd_active.stdout | trim) == "active"
+
+- name: Reset tailscale serve and restart smbd if hijacking detected
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - tailscale serve reset
+    - systemctl restart smbd
+  become: true
+  when:
+    - (smbd_active.stdout | trim) == "active"
+    - _tailscale_hijacking_445 | default(false)
+
+- name: Verify listeners on ports 139/445 after remediation
+  ansible.builtin.command: bash -lc 'ss -tulpn | egrep ":(139|445)\\b" || true'
+  register: ss_listeners
+  changed_when: false
+  become: true
+  when: (smbd_active.stdout | trim) == "active"
+
+- name: Show current listeners on 139/445
+  ansible.builtin.debug:
+    msg: "{{ ss_listeners.stdout_lines | default([]) }}"
+  when: (smbd_active.stdout | trim) == "active"
+

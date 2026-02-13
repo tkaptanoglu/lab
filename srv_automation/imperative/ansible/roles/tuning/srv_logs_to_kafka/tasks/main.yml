@@ -1,0 +1,27 @@
+- name: Install kcat (Kafka CLI producer)
+  become: true
+  ansible.builtin.apt:
+    name: kcat
+    state: present
+    update_cache: yes
+
+- name: Install jq for JSON construction
+  become: true
+  ansible.builtin.apt:
+    name: jq
+    state: present
+
+- name: Deploy log-to-Kafka script
+  become: true
+  ansible.builtin.template:
+    src: log_to_kafka.sh.j2
+    dest: /usr/local/sbin/log_to_kafka.sh
+    mode: '0755'
+
+- name: Deploy cron job for daily log shipment
+  become: true
+  ansible.builtin.template:
+    src: cron_log_to_kafka.j2
+    dest: /etc/cron.d/log_to_kafka
+    mode: '0644'
+

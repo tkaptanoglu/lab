@@ -1,0 +1,7 @@
+---
+- name: Network configuration
+  hosts: all
+  become: yes
+  roles:
+    - roles/networking/networkmanager_migrate
+    - roles/networking/pin_wlan0_access_point

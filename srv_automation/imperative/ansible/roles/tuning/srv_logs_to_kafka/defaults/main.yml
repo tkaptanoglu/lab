@@ -1,0 +1,7 @@
+kafka_bootstrap_servers: "kafka01:9092"
+kafka_topic: "server-daily-logs"
+log_priority: "err..alert"    # high-signal logs only
+max_lines: 3000               # prevent giant Kafka messages
+cron_minute: "45"
+cron_hour: "05"
+

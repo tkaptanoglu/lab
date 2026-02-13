@@ -1,0 +1,12 @@
+# roles/network/pin_wlan0_access_point/handlers/main.yml
+---
+- name: netplan generate
+  become: true
+  ansible.builtin.command: netplan generate
+  changed_when: false
+
+- name: netplan apply
+  become: true
+  ansible.builtin.command: netplan apply
+  changed_when: true
+

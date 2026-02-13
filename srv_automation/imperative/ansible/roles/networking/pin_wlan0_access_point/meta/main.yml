@@ -1,0 +1,13 @@
+---
+galaxy_info:
+  role_name: pin_wlan0_access_point
+  author: you
+  description: Pin wlan0 to a specific AP BSSID by injecting bssid into netplan cloud-init YAML and verifying via NetworkManager.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+dependencies: []
+

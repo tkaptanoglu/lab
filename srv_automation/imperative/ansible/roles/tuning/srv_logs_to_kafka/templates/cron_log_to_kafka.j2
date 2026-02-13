@@ -1,0 +1,6 @@
+# Ship last 24 hours of server logs to Kafka
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+{{ cron_minute }} {{ cron_hour }} * * * root /usr/local/sbin/log_to_kafka.sh >/var/log/log_to_kafka.log 2>&1
+
