@@ -1,0 +1,81 @@
+---
+- name: Ensure external drive is mounted before log shipping
+  ansible.builtin.import_role:
+    name: storage/mount_external_drive
+
+# FIX: Ensure the log directory exists, but do NOT set owner/group/mode (prevents chown failures)
+- name: Ensure log directory exists on the mounted drive (NO CHOWN / NO CHMOD)
+  become: true
+  ansible.builtin.file:
+    path: "{{ srv_logs_dir }}"
+    state: directory
+
+# Ensure staging directory exists for script placement
+- name: Ensure staging directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ ship_logs_staging_path | dirname }}"
+    state: directory
+
+# Stage helper script (updated if contents differ)
+- name: Place ship_logs_to_drive.sh in staging path (updated if contents differ)
+  become: true
+  ansible.builtin.copy:
+    src: "../../../helper_scripts/ship_logs_to_drive.sh"
+    dest: "{{ ship_logs_staging_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+# Ensure install directory exists
+- name: Ensure install directory exists
+  become: true
+  ansible.builtin.file:
+    path: "{{ ship_logs_install_path | dirname }}"
+    state: directory
+
+# Install to final path (updated if contents differ)
+- name: Install ship_logs_to_drive.sh to install path (updated if contents differ)
+  become: true
+  ansible.builtin.copy:
+    src: "../../../helper_scripts/ship_logs_to_drive.sh"
+    dest: "{{ ship_logs_install_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create cron job to ship logs daily at 05:45
+  become: true
+  ansible.builtin.cron:
+    name: "Ship last 24h server logs to shared external disk"
+    minute: "{{ srv_logs_cron_minute }}"
+    hour: "{{ srv_logs_cron_hour }}"
+    user: root
+    job: >-
+      /bin/bash -lc
+      'set -e;
+       mountpoint -q {{ external_mount_point }} || exit 0;
+       MOUNT_POINT={{ external_mount_point }} LOG_DIR={{ srv_logs_dir }} {{ ship_logs_install_path }} >/dev/null'
+
+# Run once now and verify
+- name: Run ship_logs_to_drive.sh now
+  become: true
+  ansible.builtin.command: >
+    /bin/bash -lc
+    'set -e;
+     mountpoint -q {{ external_mount_point }};
+     MOUNT_POINT={{ external_mount_point }} LOG_DIR={{ srv_logs_dir }} {{ ship_logs_install_path }}'
+  register: _ship_run
+  changed_when: true
+
+- name: Verify the log file exists where required
+  become: true
+  ansible.builtin.stat:
+    path: "{{ _ship_run.stdout | trim }}"
+  register: _log_stat
+
+- name: Fail if the log file was not created
+  ansible.builtin.fail:
+    msg: "Expected log file was not created at: {{ _ship_run.stdout | trim }}"
+  when: not _log_stat.stat.exists
+

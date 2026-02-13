@@ -1,0 +1,8 @@
+- hosts: all
+  become: true
+  vars_files:
+    - inventory/group_vars/all/tuning.yml
+  roles:
+    - role: roles/storage/mount_external_drive
+    - role: roles/tuning/srv_logs_to_shared_disk
+

@@ -1,0 +1,18 @@
+external_mount_point: /mnt/external
+
+# Server-side local USB mount (drive server only)
+external_local_fs_label: ""
+external_local_fstype: "ext4"
+external_local_mount_opts: "defaults,nofail"
+
+# Client-side CIFS mount (non-drive servers)
+external_cifs_mount_opts: "rw,vers=3.0,nofail,_netdev,iocharset=utf8,uid=0,gid=0,file_mode=0644,dir_mode=0755"
+external_cifs_username: ""
+external_cifs_password: ""
+external_cifs_credentials_file: "/etc/samba/ansible-external-drive.cred"
+
+# Drive server identity + share
+# Intentionally blank here; MUST be defined in inventory vars.
+external_drive_server_ip: ""
+external_samba_share_name: ""
+

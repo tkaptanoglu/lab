@@ -1,0 +1,9 @@
+external_mount_point: /mnt/external
+
+srv_logs_dir: "/mnt/external/srv_logs"
+ship_logs_install_path: "/usr/local/bin/ship_logs_to_drive.sh"
+ship_logs_staging_path: "/usr/local/share/helper_scripts/ship_logs_to_drive.sh"
+
+srv_logs_cron_hour: "5"
+srv_logs_cron_minute: "45"
+

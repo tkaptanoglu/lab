@@ -1,0 +1,111 @@
+---
+- name: Validate required parameters are defined
+  ansible.builtin.assert:
+    that:
+      - external_mount_point is defined
+      - external_drive_server_ip is defined
+      - external_drive_server_ip | length > 0
+      - external_samba_share_name is defined
+      - external_samba_share_name | length > 0
+    fail_msg: >
+      Required variables missing. Ensure inventory/group_vars/all/tuning.yml defines:
+      external_drive_server_ip and external_samba_share_name.
+
+# FIX: Ensure the directory exists, but do NOT attempt chown/chmod.
+# This avoids failures on filesystems/mountpoints that don't permit chown
+# (or if the directory is already owned by a non-root user).
+- name: Ensure mount point directory exists (no ownership changes)
+  become: true
+  ansible.builtin.file:
+    path: "{{ external_mount_point }}"
+    state: directory
+
+- name: Determine if this host is the drive server
+  ansible.builtin.set_fact:
+    _is_drive_server: "{{ (ansible_host | default(inventory_hostname)) == external_drive_server_ip }}"
+
+- name: Check if external mount point is already mounted
+  ansible.builtin.command: "mountpoint -q {{ external_mount_point }}"
+  register: _mp_check
+  changed_when: false
+  failed_when: false
+
+# ----------------------------
+# Drive server: mount local USB disk by filesystem LABEL (persistent)
+# ----------------------------
+- name: Assert local USB mount variables are set (drive server)
+  when: _is_drive_server and _mp_check.rc != 0
+  ansible.builtin.assert:
+    that:
+      - external_local_fs_label is defined
+      - external_local_fs_label | length > 0
+    fail_msg: >
+      This host is the drive server, but external_local_fs_label is not set.
+      Set it in tuning.yml to the filesystem LABEL of the USB disk.
+
+- name: Find local block device by filesystem label (drive server)
+  when: _is_drive_server and _mp_check.rc != 0
+  become: true
+  ansible.builtin.command: "blkid -L {{ external_local_fs_label }}"
+  register: _local_dev
+  changed_when: false
+  failed_when: false
+
+- name: Fail if local device with label was not found (drive server)
+  when: _is_drive_server and _mp_check.rc != 0 and (_local_dev.rc != 0 or (_local_dev.stdout | trim) == "")
+  ansible.builtin.fail:
+    msg: >
+      Could not find a local block device with filesystem label '{{ external_local_fs_label }}'
+      on the drive server. Check lsblk -f / blkid output and update external_local_fs_label.
+
+- name: Mount local external drive on drive server
+  when: _is_drive_server and _mp_check.rc != 0
+  become: true
+  ansible.posix.mount:
+    path: "{{ external_mount_point }}"
+    src: "{{ _local_dev.stdout | trim }}"
+    fstype: "{{ external_local_fstype }}"
+    opts: "{{ external_local_mount_opts }}"
+    state: mounted
+
+# ----------------------------
+# Non-drive servers: mount Samba share via CIFS (no credentials file; no fstab password)
+# ----------------------------
+- name: Ensure CIFS utilities are installed (non-drive servers)
+  when: (not _is_drive_server) and _mp_check.rc != 0
+  become: true
+  ansible.builtin.apt:
+    name:
+      - cifs-utils
+    state: present
+    update_cache: true
+
+- name: Validate CIFS credentials are provided for non-drive servers
+  when: (not _is_drive_server) and _mp_check.rc != 0
+  ansible.builtin.assert:
+    that:
+      - external_cifs_username is defined
+      - external_cifs_username | length > 0
+      - external_cifs_password is defined
+      - external_cifs_password | length > 0
+    fail_msg: >
+      CIFS credentials missing. Set external_cifs_username and external_cifs_password in tuning.yml.
+      external_cifs_password should come from vault key samba_drive_password.
+
+- name: Mount Samba share on non-drive servers (one-shot mount; not persisted)
+  when: (not _is_drive_server) and _mp_check.rc != 0
+  become: true
+  no_log: true
+  ansible.builtin.command: >
+    mount -t cifs
+    //{{ external_drive_server_ip }}/{{ external_samba_share_name }}
+    {{ external_mount_point }}
+    -o {{ external_cifs_mount_opts }},username={{ external_cifs_username }},password={{ external_cifs_password }}
+
+- name: Re-check mountpoint after mounting (non-drive servers)
+  when: (not _is_drive_server)
+  ansible.builtin.command: "mountpoint -q {{ external_mount_point }}"
+  register: _mp_check_after
+  changed_when: false
+  failed_when: _mp_check_after.rc != 0
+
