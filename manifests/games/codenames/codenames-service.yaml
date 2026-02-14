@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: codenames
+  namespace: codenames
+spec:
+  selector:
+    app: codenames
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+      nodePort: 30080   # pick an unused port in 30000-32767
+

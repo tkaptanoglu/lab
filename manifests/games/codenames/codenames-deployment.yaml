@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codenames
+  namespace: codenames
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: codenames
+  template:
+    metadata:
+      labels:
+        app: codenames
+    spec:
+      containers:
+        - name: codenames
+          image: ghcr.io/schluggi/codenames:latest
+          ports:
+            - containerPort: 5000
+          env:
+            # From the project README
+            - name: GAME_MODES
+              value: "pictures,classic_de,classic_en,classic_en-undercover"
+            # Optional but recommended (stable sessions across restarts)
+            # - name: SECRET_KEY
+            #   value: "change-me-to-a-long-random-string"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 20
