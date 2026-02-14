@@ -1,0 +1,10 @@
+---
+games_namespace: games
+
+scribble_name: scribble
+scribble_image: biosmarcel/scribble.rs:v0.9.5
+scribble_container_port: 8080
+scribble_nodeport: 30081
+
+scribble_manifest_dir: "{{ ansible_env.HOME }}/k8s-manifests/games/scribble"
+

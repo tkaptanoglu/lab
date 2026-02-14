@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ scribble_name }}
+  namespace: {{ games_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ scribble_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ scribble_name }}
+    spec:
+      containers:
+        - name: {{ scribble_name }}
+          image: {{ scribble_image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ scribble_container_port }}
+          env:
+            - name: PORT
+              value: "{{ scribble_container_port }}"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ scribble_container_port }}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ scribble_container_port }}
+            initialDelaySeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+

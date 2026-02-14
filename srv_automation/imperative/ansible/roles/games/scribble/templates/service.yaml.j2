@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ scribble_name }}
+  namespace: {{ games_namespace }}
+spec:
+  selector:
+    app: {{ scribble_name }}
+  type: NodePort
+  ports:
+    - name: http
+      port: {{ scribble_container_port }}
+      targetPort: {{ scribble_container_port }}
+      nodePort: {{ scribble_nodeport }}
+
