@@ -1,0 +1,15 @@
+---
+# REQUIRED: set in group_vars/host_vars (keep private if you want)
+# kubectl_kubeconfig: /etc/kubernetes/admin.conf
+
+games_namespace: games
+
+portal_name: games-portal
+portal_manifest_dir: "{{ ansible_env.HOME }}/k8s-manifests/games/portal"
+
+portal_image: nginx:stable-alpine
+portal_nodeport: 30083
+
+# Game links
+scribble_url: "http://192.168.86.24:30081/"
+

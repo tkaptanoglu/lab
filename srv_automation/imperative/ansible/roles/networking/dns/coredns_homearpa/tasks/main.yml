@@ -1,0 +1,77 @@
+---
+- name: Fail if kubectl_kubeconfig is not set
+  ansible.builtin.assert:
+    that:
+      - kubectl_kubeconfig is defined
+      - kubectl_kubeconfig | length > 0
+    fail_msg: >
+      kubectl_kubeconfig is not set. Define it in inventory/group_vars/host_vars
+      (e.g. /etc/kubernetes/admin.conf or /etc/rancher/k3s/k3s.yaml).
+
+- name: Fail if internal_dns_node_name is not set
+  ansible.builtin.assert:
+    that:
+      - internal_dns_node_name is defined
+      - internal_dns_node_name | length > 0
+    fail_msg: >
+      internal_dns_node_name is not set. Set it to the Kubernetes node name that has IP {{ internal_dns_ip }}.
+      Find it with: kubectl --kubeconfig <path> get nodes -o wide
+
+- name: Ensure manifest directory exists
+  ansible.builtin.file:
+    path: "{{ internal_dns_manifest_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Render namespace manifest
+  ansible.builtin.template:
+    src: namespace.yaml.j2
+    dest: "{{ internal_dns_manifest_dir }}/namespace.yaml"
+    mode: "0644"
+
+- name: Render CoreDNS configmap manifest
+  ansible.builtin.template:
+    src: configmap.yaml.j2
+    dest: "{{ internal_dns_manifest_dir }}/configmap.yaml"
+    mode: "0644"
+
+- name: Render CoreDNS deployment manifest
+  ansible.builtin.template:
+    src: deployment.yaml.j2
+    dest: "{{ internal_dns_manifest_dir }}/deployment.yaml"
+    mode: "0644"
+
+- name: Label the chosen node to pin internal DNS (idempotent)
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }}
+      label node {{ internal_dns_node_name }}
+      {{ internal_dns_node_label_key }}={{ internal_dns_node_label_value }} --overwrite
+  register: label_node
+  changed_when: "'labeled' in label_node.stdout or 'configured' in label_node.stdout or 'not labeled' not in label_node.stdout"
+  failed_when: label_node.rc != 0
+
+- name: Verify kubectl can reach the cluster
+  ansible.builtin.command:
+    cmd: "kubectl --kubeconfig {{ kubectl_kubeconfig }} get nodes"
+  register: kubectl_get_nodes
+  changed_when: false
+
+- name: Apply CoreDNS internal DNS manifests
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }} apply --validate=false
+      -f {{ internal_dns_manifest_dir }}/namespace.yaml
+      -f {{ internal_dns_manifest_dir }}/configmap.yaml
+      -f {{ internal_dns_manifest_dir }}/deployment.yaml
+  register: kubectl_apply
+  changed_when: >
+    ('created' in kubectl_apply.stdout) or
+    ('configured' in kubectl_apply.stdout)
+
+- name: Show what to set on clients
+  ansible.builtin.debug:
+    msg:
+      - "Set DNS server on clients to: {{ internal_dns_ip }}"
+      - "Then open: http://{{ internal_dns_hostname }}/ (once your portal exists)"
+

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ portal_name }}
+  namespace: {{ games_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ portal_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ portal_name }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ portal_image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+      volumes:
+        - name: html
+          configMap:
+            name: {{ portal_name }}-html
+

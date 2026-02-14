@@ -1,0 +1,65 @@
+---
+- name: Fail if kubectl_kubeconfig is not set
+  ansible.builtin.assert:
+    that:
+      - kubectl_kubeconfig is defined
+      - kubectl_kubeconfig | length > 0
+    fail_msg: >
+      kubectl_kubeconfig is not set. Define it in inventory/group_vars/host_vars
+      (e.g. /etc/kubernetes/admin.conf or /etc/rancher/k3s/k3s.yaml).
+
+- name: Ensure manifest directory exists
+  ansible.builtin.file:
+    path: "{{ portal_manifest_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Render namespace manifest
+  ansible.builtin.template:
+    src: namespace.yaml.j2
+    dest: "{{ portal_manifest_dir }}/namespace.yaml"
+    mode: "0644"
+
+- name: Render configmap manifest
+  ansible.builtin.template:
+    src: configmap.yaml.j2
+    dest: "{{ portal_manifest_dir }}/configmap.yaml"
+    mode: "0644"
+
+- name: Render deployment manifest
+  ansible.builtin.template:
+    src: deployment.yaml.j2
+    dest: "{{ portal_manifest_dir }}/deployment.yaml"
+    mode: "0644"
+
+- name: Render service manifest
+  ansible.builtin.template:
+    src: service.yaml.j2
+    dest: "{{ portal_manifest_dir }}/service.yaml"
+    mode: "0644"
+
+- name: Verify kubectl can reach the cluster (explicit kubeconfig)
+  ansible.builtin.command:
+    cmd: "kubectl --kubeconfig {{ kubectl_kubeconfig }} get nodes"
+  register: kubectl_get_nodes
+  changed_when: false
+
+- name: Apply portal manifests (explicit kubeconfig, no validation)
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }} apply --validate=false
+      -f {{ portal_manifest_dir }}/namespace.yaml
+      -f {{ portal_manifest_dir }}/configmap.yaml
+      -f {{ portal_manifest_dir }}/deployment.yaml
+      -f {{ portal_manifest_dir }}/service.yaml
+  register: kubectl_apply
+  changed_when: >
+    ('created' in kubectl_apply.stdout) or
+    ('configured' in kubectl_apply.stdout)
+
+- name: Show portal URL
+  ansible.builtin.debug:
+    msg:
+      - "Games portal deployed."
+      - "Open: http://192.168.86.24:{{ portal_nodeport }}/"
+

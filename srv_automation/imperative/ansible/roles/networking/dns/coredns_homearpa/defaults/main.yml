@@ -1,0 +1,35 @@
+---
+# REQUIRED: kubeconfig path on the server (set this in group_vars/host_vars ideally)
+# kubectl_kubeconfig: /etc/kubernetes/admin.conf
+
+# REQUIRED: Kubernetes node name that corresponds to 192.168.86.24
+# Find it with: kubectl get nodes -o wide
+internal_dns_node_name: ""
+
+# Label used to pin CoreDNS to the chosen node
+internal_dns_node_label_key: "internal-dns"
+internal_dns_node_label_value: "true"
+
+# Namespace for this DNS service
+internal_dns_namespace: "dns"
+
+# Where to store rendered manifests on the server
+internal_dns_manifest_dir: "{{ ansible_env.HOME }}/k8s-manifests/dns/coredns-homearpa"
+
+# Domain you want to serve
+internal_dns_zone: "home.arpa"
+
+# The hostname you want
+internal_dns_hostname: "at-oyuncaklari.home.arpa"
+
+# The IP the hostname should resolve to (your chosen node IP)
+internal_dns_ip: "192.168.86.24"
+
+# Upstream resolvers for everything else
+internal_dns_upstreams:
+  - "1.1.1.1"
+  - "8.8.8.8"
+
+# CoreDNS image (multi-arch)
+coredns_image: "coredns/coredns:1.11.1"
+

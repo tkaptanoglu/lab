@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ portal_name }}
+  namespace: {{ games_namespace }}
+spec:
+  selector:
+    app: {{ portal_name }}
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: {{ portal_nodeport }}
+
