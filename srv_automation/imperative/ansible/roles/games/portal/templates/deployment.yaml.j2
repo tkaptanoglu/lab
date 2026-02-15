@@ -21,7 +21,11 @@ spec:
             - containerPort: 80
           volumeMounts:
             - name: html
-              mountPath: /usr/share/nginx/html
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+              readOnly: true
+            - name: images
+              mountPath: /usr/share/nginx/html/images
               readOnly: true
           readinessProbe:
             httpGet:
@@ -37,4 +41,9 @@ spec:
         - name: html
           configMap:
             name: {{ portal_name }}-html
-
+            items:
+              - key: index.html
+                path: index.html
+        - name: images
+          configMap:
+            name: {{ portal_name }}-images

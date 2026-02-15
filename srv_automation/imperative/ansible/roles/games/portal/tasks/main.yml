@@ -14,6 +14,33 @@
     state: directory
     mode: "0755"
 
+- name: Ensure images subdirectory exists
+  ansible.builtin.file:
+    path: "{{ portal_manifest_dir }}/images"
+    state: directory
+    mode: "0755"
+
+- name: Copy game icon images to manifest directory
+  ansible.builtin.copy:
+    src: "images/{{ item.icon_image }}"
+    dest: "{{ portal_manifest_dir }}/images/{{ item.icon_image }}"
+    mode: "0644"
+  loop: "{{ portal_games }}"
+  when: item.icon_image is defined
+
+- name: Read game icon images (base64 encoded)
+  ansible.builtin.slurp:
+    src: "{{ portal_manifest_dir }}/images/{{ item.icon_image }}"
+  loop: "{{ portal_games }}"
+  register: game_images_raw
+  when: item.icon_image is defined
+
+- name: Build game images dictionary
+  ansible.builtin.set_fact:
+    game_images: "{{ game_images | default({}) | combine({item.item.icon_image: item.content}) }}"
+  loop: "{{ game_images_raw.results }}"
+  when: not item.skipped | default(false)
+
 - name: Render namespace manifest
   ansible.builtin.template:
     src: namespace.yaml.j2
@@ -62,4 +89,3 @@
     msg:
       - "Games portal deployed."
       - "Open: http://192.168.86.24:{{ portal_nodeport }}/"
-

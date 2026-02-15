@@ -14,16 +14,16 @@ portal_nodeport: 30083
 portal_games:
   - name: "Scribble.rs"
     description: "Draw & guess party game"
-    icon_text: "S"
+    icon_image: "scribble.jpg"
     url: "http://192.168.86.24:30081/"
 
   - name: "Tetris"
     description: "Classic block stacking game"
-    icon_text: "T"
+    icon_image: "tetris.png"
     url: "http://192.168.86.24:30085/"
 
   - name: "Monopoly"
     description: "Monopoly browser game"
-    icon_text: "M"
+    icon_image: "monopoly.png"
     url: "http://192.168.86.24:30087/"
 
