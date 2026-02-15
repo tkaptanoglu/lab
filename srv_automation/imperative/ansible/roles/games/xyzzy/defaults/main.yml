@@ -1,9 +1,0 @@
----
-# Default variables for xyzzy deployment
-xyzzy_namespace: games
-xyzzy_image: tkaptanoglu/pretend-youre-xyzzy:arm64
-xyzzy_app_name: xyzzy
-xyzzy_replicas: 1
-xyzzy_container_port: 8080
-xyzzy_nodeport: 30087
-xyzzy_manifest_dir: /tmp/xyzzy-manifests

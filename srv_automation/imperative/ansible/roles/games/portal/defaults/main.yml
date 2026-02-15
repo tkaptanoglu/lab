@@ -22,13 +22,3 @@ portal_games:
     icon_text: "T"
     url: "http://192.168.86.24:30085/"
 
-  - name: "Xyzzy"
-    description: "Pretend You're Xyzzy"
-    icon_text: "X"
-    url: "http://192.168.86.24:30087/"
-
-  - name: "Backgammon"
-    description: "A JavaScript game of backgammon"
-    icon_text: "B"
-    url: "http://192.168.86.24:30089/"
-
