@@ -1,0 +1,9 @@
+---
+games_namespace: games
+
+monopoly_name: monopoly
+monopoly_image: tkaptanoglu/monopoly:arm64
+monopoly_container_port: 8443
+monopoly_nodeport: 30087
+
+monopoly_manifest_dir: "{{ ansible_env.HOME }}/k8s-manifests/games/monopoly"

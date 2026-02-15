@@ -9,4 +9,5 @@
     - role: roles/games/portal
     - role: roles/games/scribble
     - role: roles/games/tetris
+    - role: roles/games/monopoly
 

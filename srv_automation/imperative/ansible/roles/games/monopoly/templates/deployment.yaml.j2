@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ monopoly_name }}
+  namespace: {{ games_namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ monopoly_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ monopoly_name }}
+    spec:
+      containers:
+        - name: {{ monopoly_name }}
+          image: {{ monopoly_image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ monopoly_container_port }}
+          env:
+            - name: PORT
+              value: "{{ monopoly_container_port }}"
+            - name: HTTP
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ monopoly_container_port }}
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ monopoly_container_port }}
+            initialDelaySeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"

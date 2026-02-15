@@ -22,3 +22,8 @@ portal_games:
     icon_text: "T"
     url: "http://192.168.86.24:30085/"
 
+  - name: "Monopoly"
+    description: "Monopoly browser game"
+    icon_text: "M"
+    url: "http://192.168.86.24:30087/"
+
