@@ -1,0 +1,57 @@
+---
+- name: Fail if kubectl_kubeconfig is not set
+  ansible.builtin.assert:
+    that:
+      - kubectl_kubeconfig is defined
+      - kubectl_kubeconfig | length > 0
+    fail_msg: >
+      kubectl_kubeconfig is not set. Define it in inventory/group_vars/host_vars
+      (e.g. /etc/rancher/k3s/k3s.yaml for k3s, /etc/kubernetes/admin.conf for kubeadm).
+
+- name: Ensure manifest directory exists
+  ansible.builtin.file:
+    path: "{{ xyzzy_manifest_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Pull xyzzy image from Docker Hub
+  ansible.builtin.command:
+    cmd: "docker pull {{ xyzzy_image }}"
+  register: docker_pull
+  changed_when: "'Downloaded newer image' in docker_pull.stdout or 'Pulling from' in docker_pull.stdout"
+
+- name: Render namespace manifest
+  ansible.builtin.template:
+    src: namespace.yaml.j2
+    dest: "{{ xyzzy_manifest_dir }}/namespace.yaml"
+    mode: "0644"
+
+- name: Render deployment manifest
+  ansible.builtin.template:
+    src: deployment.yaml.j2
+    dest: "{{ xyzzy_manifest_dir }}/deployment.yaml"
+    mode: "0644"
+
+- name: Render service manifest
+  ansible.builtin.template:
+    src: service.yaml.j2
+    dest: "{{ xyzzy_manifest_dir }}/service.yaml"
+    mode: "0644"
+
+- name: Verify kubectl can reach the cluster (using explicit kubeconfig)
+  ansible.builtin.command:
+    cmd: "kubectl --kubeconfig {{ kubectl_kubeconfig }} cluster-info"
+  register: kubectl_cluster_info
+  changed_when: false
+
+- name: Apply xyzzy manifests with kubectl (explicit kubeconfig, no validation)
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }} apply --validate=false
+      -f {{ xyzzy_manifest_dir }}/namespace.yaml
+      -f {{ xyzzy_manifest_dir }}/deployment.yaml
+      -f {{ xyzzy_manifest_dir }}/service.yaml
+  register: kubectl_apply
+  changed_when: >
+    ('created' in kubectl_apply.stdout) or
+    ('configured' in kubectl_apply.stdout)

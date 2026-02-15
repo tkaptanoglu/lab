@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ tetris_name }}
+  namespace: {{ games_namespace }}
+  labels:
+    app: {{ tetris_name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ tetris_name }}
+  template:
+    metadata:
+      labels:
+        app: {{ tetris_name }}
+    spec:
+      containers:
+        - name: {{ tetris_name }}
+          image: {{ tetris_image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "{{ tetris_container_port }}"
+          ports:
+            - containerPort: {{ tetris_container_port }}
+          # No livenessProbe: dev server on ARM can be slow; liveness causes flapping.
+          readinessProbe:
+            httpGet:
+              path: /react-tetris/
+              port: {{ tetris_container_port }}
+            initialDelaySeconds: 60
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+

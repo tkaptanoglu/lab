@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ tetris_name }}
+  namespace: {{ games_namespace }}
+  labels:
+    app: {{ tetris_name }}
+spec:
+  selector:
+    app: {{ tetris_name }}
+  type: NodePort
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ tetris_container_port }}
+      nodePort: {{ tetris_nodeport }}
+

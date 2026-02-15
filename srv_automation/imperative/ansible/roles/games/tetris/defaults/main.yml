@@ -1,0 +1,17 @@
+---
+# REQUIRED: set in group_vars/host_vars (keep private)
+# kubectl_kubeconfig: /etc/kubernetes/admin.conf
+
+games_namespace: games
+
+tetris_name: tetris
+tetris_image: conandor/tetris:latest
+
+# React dev server port inside the container
+tetris_container_port: 3000
+
+# NodePort you want
+tetris_nodeport: 30085
+
+tetris_manifest_dir: "{{ ansible_env.HOME }}/k8s-manifests/games/tetris"
+

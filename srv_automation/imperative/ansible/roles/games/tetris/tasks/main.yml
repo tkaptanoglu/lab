@@ -1,0 +1,95 @@
+---
+- name: Fail if kubectl_kubeconfig is not set
+  ansible.builtin.assert:
+    that:
+      - kubectl_kubeconfig is defined
+      - kubectl_kubeconfig | length > 0
+    fail_msg: >
+      kubectl_kubeconfig is not set. Define it in inventory/group_vars/host_vars
+      (e.g. /etc/kubernetes/admin.conf or /etc/rancher/k3s/k3s.yaml).
+
+- name: Ensure manifest directory exists
+  ansible.builtin.file:
+    path: "{{ tetris_manifest_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Render namespace manifest
+  ansible.builtin.template:
+    src: namespace.yaml.j2
+    dest: "{{ tetris_manifest_dir }}/namespace.yaml"
+    mode: "0644"
+
+- name: Render deployment manifest
+  ansible.builtin.template:
+    src: deployment.yaml.j2
+    dest: "{{ tetris_manifest_dir }}/deployment.yaml"
+    mode: "0644"
+
+- name: Render service manifest
+  ansible.builtin.template:
+    src: service.yaml.j2
+    dest: "{{ tetris_manifest_dir }}/service.yaml"
+    mode: "0644"
+
+- name: Verify kubectl can reach the cluster (explicit kubeconfig)
+  ansible.builtin.command:
+    cmd: "kubectl --kubeconfig {{ kubectl_kubeconfig }} get nodes"
+  register: kubectl_get_nodes
+  changed_when: false
+
+# Clean only app=tetris objects (and do it BEFORE we apply)
+- name: Remove any existing Tetris resources (clean deploy)
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }}
+      -n {{ games_namespace }}
+      delete deploy,rs,pod,svc,cm -l app={{ tetris_name }} --ignore-not-found
+  register: tetris_delete
+  changed_when: "'deleted' in tetris_delete.stdout"
+
+# Apply namespace first
+- name: Apply namespace manifest
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }} apply --validate=false
+      -f {{ tetris_manifest_dir }}/namespace.yaml
+  register: apply_ns
+  changed_when: >
+    ('created' in apply_ns.stdout) or ('configured' in apply_ns.stdout)
+
+# Apply deployment explicitly
+- name: Apply deployment manifest
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }} apply --validate=false
+      -f {{ tetris_manifest_dir }}/deployment.yaml
+  register: apply_deploy
+  changed_when: >
+    ('created' in apply_deploy.stdout) or ('configured' in apply_deploy.stdout)
+
+# Apply service explicitly (this is the missing piece in your environment)
+- name: Apply service manifest
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }} apply --validate=false
+      -f {{ tetris_manifest_dir }}/service.yaml
+  register: apply_svc
+  changed_when: >
+    ('created' in apply_svc.stdout) or ('configured' in apply_svc.stdout)
+
+# Hard verification: fail if the service still doesn't exist
+- name: Verify tetris service exists
+  ansible.builtin.command:
+    cmd: >
+      kubectl --kubeconfig {{ kubectl_kubeconfig }}
+      -n {{ games_namespace }} get svc {{ tetris_name }}
+  register: verify_svc
+  changed_when: false
+
+- name: Show Tetris URL
+  ansible.builtin.debug:
+    msg:
+      - "Tetris deployed and service created."
+      - "Open: http://192.168.86.24:{{ tetris_nodeport }}/react-tetris/"
+

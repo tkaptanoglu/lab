@@ -69,11 +69,13 @@ data:
         <p>Pick a game.</p>
 
         <div class="grid">
-          <a class="card" href="{{ scribble_url }}" target="_blank" rel="noopener">
-            <div class="icon">S</div>
-            <p class="title">Scribble.rs</p>
-            <p class="desc">Draw &amp; guess party game</p>
+{% for game in portal_games %}
+          <a class="card" href="{{ game.url }}" target="_blank" rel="noopener">
+            <div class="icon">{{ game.icon_text }}</div>
+            <p class="title">{{ game.name }}</p>
+            <p class="desc">{{ game.description }}</p>
           </a>
+{% endfor %}
         </div>
 
         <div class="footer">

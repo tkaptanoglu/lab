@@ -1,5 +1,5 @@
 ---
-# REQUIRED: set in group_vars/host_vars (keep private if you want)
+# REQUIRED: set privately
 # kubectl_kubeconfig: /etc/kubernetes/admin.conf
 
 games_namespace: games
@@ -10,6 +10,25 @@ portal_manifest_dir: "{{ ansible_env.HOME }}/k8s-manifests/games/portal"
 portal_image: nginx:stable-alpine
 portal_nodeport: 30083
 
-# Game links
-scribble_url: "http://192.168.86.24:30081/"
+# Define games here
+portal_games:
+  - name: "Scribble.rs"
+    description: "Draw & guess party game"
+    icon_text: "S"
+    url: "http://192.168.86.24:30081/"
+
+  - name: "Tetris"
+    description: "Classic block stacking game"
+    icon_text: "T"
+    url: "http://192.168.86.24:30085/"
+
+  - name: "Xyzzy"
+    description: "Pretend You're Xyzzy"
+    icon_text: "X"
+    url: "http://192.168.86.24:30087/"
+
+  - name: "Backgammon"
+    description: "A JavaScript game of backgammon"
+    icon_text: "B"
+    url: "http://192.168.86.24:30089/"
 
