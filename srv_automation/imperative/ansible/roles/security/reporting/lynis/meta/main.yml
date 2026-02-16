@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  role_name: lynis_security_scorer
+  author: "Platform Engineering"
+  description: >
+    Installs Lynis, configures a daily security audit cron job,
+    pushes the hardening index to Prometheus via node_exporter
+    textfile collector, and ships audit logs to shared storage.
+  license: MIT
+  min_ansible_version: "2.12"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+  galaxy_tags:
+    - security
+    - lynis
+    - prometheus
+    - monitoring
+
+dependencies: []

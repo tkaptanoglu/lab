@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# ════════════════════════════════════════════════════════════════════
+# lynis-to-prom.sh
+# Parses the Lynis report and writes Prometheus-format metrics to
+# the node_exporter textfile collector directory.
+#
+# Managed by Ansible — do not edit manually.
+# ════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+REPORT_FILE="{{ lynis_report_dat }}"
+PROM_DIR="{{ node_exporter_textfile_dir }}"
+PROM_FILE="${PROM_DIR}/lynis.prom"
+PROM_TMP="${PROM_FILE}.tmp"
+HOSTNAME="$(hostname -s)"
+
+# ── Validate inputs ────────────────────────────────────────────────
+
+if [[ ! -f "${REPORT_FILE}" ]]; then
+    echo "[ERROR] Lynis report not found at ${REPORT_FILE}" >&2
+    exit 1
+fi
+
+if [[ ! -d "${PROM_DIR}" ]]; then
+    echo "[ERROR] Textfile collector dir not found at ${PROM_DIR}" >&2
+    exit 1
+fi
+
+# ── Parse the report ───────────────────────────────────────────────
+
+# Hardening index (0-100)
+HARDENING_INDEX=$(grep -E '^hardening_index=' "${REPORT_FILE}" | cut -d'=' -f2 | tr -d '[:space:]')
+HARDENING_INDEX="${HARDENING_INDEX:-0}"
+
+# Count warnings
+WARNING_COUNT=$(grep -cE '^warning\[\]=' "${REPORT_FILE}" || true)
+
+# Count suggestions
+SUGGESTION_COUNT=$(grep -cE '^suggestion\[\]=' "${REPORT_FILE}" || true)
+
+# Tests performed
+TESTS_PERFORMED=$(grep -E '^lynis_tests_done=' "${REPORT_FILE}" | cut -d'=' -f2 | tr -d '[:space:]')
+TESTS_PERFORMED="${TESTS_PERFORMED:-0}"
+
+# Firewall active
+FIREWALL_ACTIVE=$(grep -E '^firewall_active=' "${REPORT_FILE}" | cut -d'=' -f2 | tr -d '[:space:]')
+case "${FIREWALL_ACTIVE}" in
+    1|true|TRUE)  FIREWALL_ACTIVE_NUM=1 ;;
+    *)            FIREWALL_ACTIVE_NUM=0 ;;
+esac
+
+# Malware scanner installed
+MALWARE_SCANNER=$(grep -E '^malware_scanner_installed=' "${REPORT_FILE}" | cut -d'=' -f2 | tr -d '[:space:]')
+case "${MALWARE_SCANNER}" in
+    1|true|TRUE)  MALWARE_SCANNER_NUM=1 ;;
+    *)            MALWARE_SCANNER_NUM=0 ;;
+esac
+
+# Audit timestamp (epoch seconds for staleness detection)
+AUDIT_EPOCH="$(date '+%s')"
+
+# ── Count per-category warnings ────────────────────────────────────
+# Lynis warnings look like: warning[]=WARNING_ID|message|details|severity
+# We extract WARNING_ID prefixes to group by area.
+
+declare -A CATEGORY_WARNINGS
+while IFS= read -r line; do
+    # Extract the test ID (e.g., SSH-7408, KRNL-6000, FILE-6310)
+    TEST_ID=$(echo "${line}" | sed 's/^warning\[\]=//' | cut -d'|' -f1)
+    # Derive category from the prefix (part before the dash)
+    CATEGORY=$(echo "${TEST_ID}" | cut -d'-' -f1)
+    CATEGORY_WARNINGS["${CATEGORY}"]=$(( ${CATEGORY_WARNINGS["${CATEGORY}"]:-0} + 1 ))
+done < <(grep -E '^warning\[\]=' "${REPORT_FILE}" || true)
+
+# ── Write metrics ──────────────────────────────────────────────────
+# Write to a temp file and atomically move it to avoid node_exporter
+# reading a half-written file.
+
+{
+    echo "# HELP lynis_hardening_index Lynis hardening index score (0-100)"
+    echo "# TYPE lynis_hardening_index gauge"
+    echo "lynis_hardening_index{host=\"${HOSTNAME}\"} ${HARDENING_INDEX}"
+    echo ""
+    echo "# HELP lynis_warnings_total Total number of Lynis warnings"
+    echo "# TYPE lynis_warnings_total gauge"
+    echo "lynis_warnings_total{host=\"${HOSTNAME}\"} ${WARNING_COUNT}"
+    echo ""
+    echo "# HELP lynis_suggestions_total Total number of Lynis suggestions"
+    echo "# TYPE lynis_suggestions_total gauge"
+    echo "lynis_suggestions_total{host=\"${HOSTNAME}\"} ${SUGGESTION_COUNT}"
+    echo ""
+    echo "# HELP lynis_tests_performed Total number of tests performed"
+    echo "# TYPE lynis_tests_performed gauge"
+    echo "lynis_tests_performed{host=\"${HOSTNAME}\"} ${TESTS_PERFORMED}"
+    echo ""
+    echo "# HELP lynis_firewall_active Whether the firewall is active (1=yes, 0=no)"
+    echo "# TYPE lynis_firewall_active gauge"
+    echo "lynis_firewall_active{host=\"${HOSTNAME}\"} ${FIREWALL_ACTIVE_NUM}"
+    echo ""
+    echo "# HELP lynis_malware_scanner_installed Whether a malware scanner is installed (1=yes, 0=no)"
+    echo "# TYPE lynis_malware_scanner_installed gauge"
+    echo "lynis_malware_scanner_installed{host=\"${HOSTNAME}\"} ${MALWARE_SCANNER_NUM}"
+    echo ""
+    echo "# HELP lynis_audit_timestamp_seconds Unix timestamp of the last Lynis audit"
+    echo "# TYPE lynis_audit_timestamp_seconds gauge"
+    echo "lynis_audit_timestamp_seconds{host=\"${HOSTNAME}\"} ${AUDIT_EPOCH}"
+    echo ""
+    echo "# HELP lynis_category_warnings Lynis warning count per test category"
+    echo "# TYPE lynis_category_warnings gauge"
+    for CATEGORY in "${!CATEGORY_WARNINGS[@]}"; do
+        echo "lynis_category_warnings{host=\"${HOSTNAME}\",category=\"${CATEGORY}\"} ${CATEGORY_WARNINGS[${CATEGORY}]}"
+    done
+} > "${PROM_TMP}"
+
+# Atomic move
+mv "${PROM_TMP}" "${PROM_FILE}"
+chmod 644 "${PROM_FILE}"

@@ -1,0 +1,70 @@
+---
+# ════════════════════════════════════════════════════════════════════
+# Install Lynis from GitHub
+# ════════════════════════════════════════════════════════════════════
+
+- name: Install git (required for Lynis clone)
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check if Lynis is already installed
+  ansible.builtin.stat:
+    path: "{{ lynis_install_dir }}/lynis"
+  register: _lynis_binary
+
+- name: Check installed Lynis version
+  ansible.builtin.command:
+    cmd: "{{ lynis_install_dir }}/lynis --version"
+  register: _lynis_version_output
+  changed_when: false
+  failed_when: false
+  when: _lynis_binary.stat.exists
+
+- name: Parse installed Lynis version
+  ansible.builtin.set_fact:
+    _lynis_installed_version: "{{ _lynis_version_output.stdout | default('0.0.0') | trim }}"
+  when: _lynis_binary.stat.exists
+
+- name: Determine if Lynis needs install or upgrade
+  ansible.builtin.set_fact:
+    _lynis_needs_install: >-
+      {{ (not _lynis_binary.stat.exists) or
+         (_lynis_installed_version is version(lynis_version, '<')) }}
+
+- name: Show Lynis status
+  ansible.builtin.debug:
+    msg: >-
+      Lynis installed: {{ _lynis_binary.stat.exists }},
+      version: {{ _lynis_installed_version | default('N/A') }},
+      target: {{ lynis_version }},
+      needs install/upgrade: {{ _lynis_needs_install }}
+
+# ── Clone or update the repo ──────────────────────────────────────
+
+- name: Clone Lynis repository
+  ansible.builtin.git:
+    repo: https://github.com/CISOfy/lynis.git
+    dest: "{{ lynis_install_dir }}"
+    version: "{{ lynis_version }}"
+    force: true
+  when: _lynis_needs_install | bool
+
+- name: Set ownership on Lynis directory
+  ansible.builtin.file:
+    path: "{{ lynis_install_dir }}"
+    owner: root
+    group: root
+    recurse: true
+  when: _lynis_needs_install | bool
+
+# ── Symlink for convenience ───────────────────────────────────────
+
+- name: Create symlink to lynis binary
+  ansible.builtin.file:
+    src: "{{ lynis_install_dir }}/lynis"
+    dest: /usr/local/bin/lynis
+    state: link
+    force: true

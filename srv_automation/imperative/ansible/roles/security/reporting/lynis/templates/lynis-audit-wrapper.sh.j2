@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# ════════════════════════════════════════════════════════════════════
+# lynis-audit-wrapper.sh
+# Orchestrates: Lynis audit → ship logs → generate Prometheus metrics
+#
+# Managed by Ansible — do not edit manually.
+# ════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+# ── Configuration ──────────────────────────────────────────────────
+
+LYNIS_BIN="{{ lynis_install_dir }}/lynis"
+LYNIS_REPORT="{{ lynis_report_dat }}"
+LYNIS_LOG="{{ lynis_log_file }}"
+LOG_DEST_BASE="{{ lynis_log_dest_base }}"
+PROM_SCRIPT="/usr/local/bin/lynis-to-prom.sh"
+
+DATETIME="$(date '+%Y%m%d-%H%M%S')"
+HOSTNAME="$(hostname -s)"
+DEST_FILE="${LOG_DEST_BASE}/${DATETIME}_${HOSTNAME}-lynis.txt"
+
+# ── Pre-flight checks ─────────────────────────────────────────────
+
+if [[ ! -x "${LYNIS_BIN}" ]]; then
+    echo "[ERROR] Lynis binary not found at ${LYNIS_BIN}" >&2
+    exit 1
+fi
+
+if [[ ! -d "${LOG_DEST_BASE}" ]]; then
+    echo "[WARN] Log destination ${LOG_DEST_BASE} not found, creating..." >&2
+    mkdir -p "${LOG_DEST_BASE}"
+fi
+
+# ── Run the audit ──────────────────────────────────────────────────
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Lynis audit on ${HOSTNAME}"
+
+# --cronjob suppresses interactive output and colours.
+# --auditor identifies who/what triggered the scan.
+# Lynis returns non-zero if warnings are found; we don't want to
+# abort the wrapper on warnings, so we capture the exit code.
+LYNIS_EXIT=0
+"${LYNIS_BIN}" audit system \
+    --cronjob \
+    --auditor "ansible-cron" \
+    --logfile "${LYNIS_LOG}" \
+    --report-file "${LYNIS_REPORT}" \
+    || LYNIS_EXIT=$?
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Lynis audit finished (exit code: ${LYNIS_EXIT})"
+
+# ── Ship the report to shared storage ──────────────────────────────
+
+{
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  Lynis Security Audit Report"
+    echo "  Host:     ${HOSTNAME}"
+    echo "  Date:     $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "  Lynis:    $("${LYNIS_BIN}" --version 2>/dev/null || echo 'unknown')"
+    echo "  Exit:     ${LYNIS_EXIT}"
+    echo "═══════════════════════════════════════════════════════════"
+    echo ""
+    echo "──── Hardening Index ─────────────────────────────────────"
+    grep -E '^hardening_index=' "${LYNIS_REPORT}" || echo "hardening_index=UNAVAILABLE"
+    echo ""
+    echo "──── Warnings ────────────────────────────────────────────"
+    grep -E '^warning\[\]=' "${LYNIS_REPORT}" || echo "(none)"
+    echo ""
+    echo "──── Suggestions ─────────────────────────────────────────"
+    grep -E '^suggestion\[\]=' "${LYNIS_REPORT}" || echo "(none)"
+    echo ""
+    echo "──── Full Report Data ────────────────────────────────────"
+    cat "${LYNIS_REPORT}"
+} > "${DEST_FILE}"
+
+chmod 644 "${DEST_FILE}"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Report shipped to ${DEST_FILE}"
+
+# ── Generate Prometheus metrics ────────────────────────────────────
+
+if [[ -x "${PROM_SCRIPT}" ]]; then
+    "${PROM_SCRIPT}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Prometheus metrics updated"
+else
+    echo "[WARN] Prometheus parser not found at ${PROM_SCRIPT}" >&2
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Done."

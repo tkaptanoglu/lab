@@ -1,0 +1,26 @@
+[Unit]
+Description=Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=node_exporter
+Group=node_exporter
+ExecStart=/usr/local/bin/node_exporter \
+  --collector.textfile.directory={{ node_exporter_textfile_dir }} \
+  --web.listen-address=:9100
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{ node_exporter_textfile_dir }}
+
+# Hardening
+CapabilityBoundingSet=
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

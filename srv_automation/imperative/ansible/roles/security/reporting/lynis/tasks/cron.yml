@@ -1,0 +1,43 @@
+---
+# ════════════════════════════════════════════════════════════════════
+# Deploy the wrapper script and cron job
+# ════════════════════════════════════════════════════════════════════
+
+# ── Ensure log destination exists ──────────────────────────────────
+
+- name: Create Lynis log directory on shared drive
+  ansible.builtin.file:
+    path: "{{ lynis_log_dest_base }}"
+    state: directory
+    mode: "0777"
+
+# ── Deploy the wrapper script ─────────────────────────────────────
+
+- name: Deploy Lynis audit wrapper script
+  ansible.builtin.template:
+    src: lynis-audit-wrapper.sh.j2
+    dest: /usr/local/bin/lynis-audit-wrapper.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+# ── Deploy the report-to-prom parser ──────────────────────────────
+
+- name: Deploy Lynis-to-Prometheus parser script
+  ansible.builtin.template:
+    src: lynis-to-prom.sh.j2
+    dest: /usr/local/bin/lynis-to-prom.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+# ── Schedule the cron job ──────────────────────────────────────────
+
+- name: Schedule daily Lynis audit at {{ lynis_cron_hour }}:{{ lynis_cron_minute }}
+  ansible.builtin.cron:
+    name: "lynis-daily-security-audit"
+    minute: "{{ lynis_cron_minute }}"
+    hour: "{{ lynis_cron_hour }}"
+    job: "/usr/local/bin/lynis-audit-wrapper.sh >> /var/log/lynis-cron.log 2>&1"
+    user: root
+    state: present

@@ -1,0 +1,16 @@
+---
+# ════════════════════════════════════════════════════════════════════
+# lynis_security_scorer – main task orchestrator
+# ════════════════════════════════════════════════════════════════════
+
+- name: Include prerequisite tasks (node_exporter)
+  ansible.builtin.include_tasks: prerequisites.yml
+  tags: [prerequisites]
+
+- name: Include Lynis installation tasks
+  ansible.builtin.include_tasks: install_lynis.yml
+  tags: [lynis]
+
+- name: Include cron and wrapper script tasks
+  ansible.builtin.include_tasks: cron.yml
+  tags: [cron]

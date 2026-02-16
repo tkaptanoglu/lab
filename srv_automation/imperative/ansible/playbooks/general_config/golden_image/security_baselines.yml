@@ -36,4 +36,5 @@
         server_autopatch_origins:
           - "o=Ubuntu,a=${distro_codename}-security"
           - "o=Ubuntu,a=${distro_codename}-updates"
+    - role: roles/security/reporting/lynis
 
