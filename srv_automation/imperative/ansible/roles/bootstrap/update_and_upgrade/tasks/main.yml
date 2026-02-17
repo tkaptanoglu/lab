@@ -30,10 +30,9 @@
       register: unattended_pgrep
       changed_when: false
       failed_when: false
-
-  until: unattended_pgrep.rc != 0   # stop looping when it's NOT running
-  retries: 60                       # max "iterations" (and potential reboots)
-  delay: 0
+      until: unattended_pgrep.rc != 0   # stop looping when it's NOT running
+      retries: 60                       # max "iterations" (and potential reboots)
+      delay: 15
 
 - name: Upgrade all installed packages
   become: yes
