@@ -25,14 +25,14 @@
 
 - name: Parse installed Lynis version
   ansible.builtin.set_fact:
-    _lynis_installed_version: "{{ _lynis_version_output.stdout | default('0.0.0') | trim }}"
-  when: _lynis_binary.stat.exists
+    _lynis_installed_version: "{{ _lynis_version_output.stdout | default('0.0.0') | trim | string }}"
 
 - name: Determine if Lynis needs install or upgrade
   ansible.builtin.set_fact:
     _lynis_needs_install: >-
       {{ (not _lynis_binary.stat.exists) or
-         (_lynis_installed_version is version(lynis_version, '<')) }}
+         (_lynis_version_output.rc != 0) or
+         ((_lynis_installed_version | string) is version((lynis_version | string), '<')) }}
 
 - name: Show Lynis status
   ansible.builtin.debug:
