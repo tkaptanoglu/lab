@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════
 # lynis-audit-wrapper.sh
-# Orchestrates: Lynis audit → ship logs → generate Prometheus metrics
+# Orchestrates: Lynis audit → generate Prometheus metrics → ship logs
 #
 # Managed by Ansible — do not edit manually.
 # ════════════════════════════════════════════════════════════════════
@@ -11,6 +11,7 @@ set -euo pipefail
 # ── Configuration ──────────────────────────────────────────────────
 
 LYNIS_BIN="{{ lynis_install_dir }}/lynis"
+LYNIS_DIR="{{ lynis_install_dir }}"
 LYNIS_REPORT="{{ lynis_report_dat }}"
 LYNIS_LOG="{{ lynis_log_file }}"
 LOG_DEST_BASE="{{ lynis_log_dest_base }}"
@@ -27,14 +28,13 @@ if [[ ! -x "${LYNIS_BIN}" ]]; then
     exit 1
 fi
 
-if [[ ! -d "${LOG_DEST_BASE}" ]]; then
-    echo "[WARN] Log destination ${LOG_DEST_BASE} not found, creating..." >&2
-    mkdir -p "${LOG_DEST_BASE}"
-fi
-
 # ── Run the audit ──────────────────────────────────────────────────
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting Lynis audit on ${HOSTNAME}"
+
+# Lynis requires being run from its installation directory so it can
+# find its include/ and db/ directories relative to its own path.
+cd "${LYNIS_DIR}"
 
 # --cronjob suppresses interactive output and colours.
 # --auditor identifies who/what triggered the scan.
@@ -50,40 +50,56 @@ LYNIS_EXIT=0
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Lynis audit finished (exit code: ${LYNIS_EXIT})"
 
-# ── Ship the report to shared storage ──────────────────────────────
-
-{
-    echo "═══════════════════════════════════════════════════════════"
-    echo "  Lynis Security Audit Report"
-    echo "  Host:     ${HOSTNAME}"
-    echo "  Date:     $(date '+%Y-%m-%d %H:%M:%S %Z')"
-    echo "  Lynis:    $("${LYNIS_BIN}" --version 2>/dev/null || echo 'unknown')"
-    echo "  Exit:     ${LYNIS_EXIT}"
-    echo "═══════════════════════════════════════════════════════════"
-    echo ""
-    echo "──── Hardening Index ─────────────────────────────────────"
-    grep -E '^hardening_index=' "${LYNIS_REPORT}" || echo "hardening_index=UNAVAILABLE"
-    echo ""
-    echo "──── Warnings ────────────────────────────────────────────"
-    grep -E '^warning\[\]=' "${LYNIS_REPORT}" || echo "(none)"
-    echo ""
-    echo "──── Suggestions ─────────────────────────────────────────"
-    grep -E '^suggestion\[\]=' "${LYNIS_REPORT}" || echo "(none)"
-    echo ""
-    echo "──── Full Report Data ────────────────────────────────────"
-    cat "${LYNIS_REPORT}"
-} > "${DEST_FILE}"
-
-chmod 644 "${DEST_FILE}"
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Report shipped to ${DEST_FILE}"
-
-# ── Generate Prometheus metrics ────────────────────────────────────
+# ── Generate Prometheus metrics (local, must not fail) ─────────────
+# Run this BEFORE log shipping so a stale network mount cannot
+# prevent metric updates.
 
 if [[ -x "${PROM_SCRIPT}" ]]; then
     "${PROM_SCRIPT}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Prometheus metrics updated"
 else
     echo "[WARN] Prometheus parser not found at ${PROM_SCRIPT}" >&2
+fi
+
+# ── Ship the report to shared storage (best-effort) ───────────────
+# The shared drive may be unavailable (stale CIFS mount, drive
+# offline, etc.). Do not let shipping failures kill the wrapper.
+
+if [[ ! -d "${LOG_DEST_BASE}" ]]; then
+    echo "[WARN] Log destination ${LOG_DEST_BASE} not found, attempting to create..." >&2
+    mkdir -p "${LOG_DEST_BASE}" 2>/dev/null || true
+fi
+
+if [[ -d "${LOG_DEST_BASE}" ]]; then
+    {
+        echo "═══════════════════════════════════════════════════════════"
+        echo "  Lynis Security Audit Report"
+        echo "  Host:     ${HOSTNAME}"
+        echo "  Date:     $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        echo "  Lynis:    $("${LYNIS_BIN}" --version 2>/dev/null || echo 'unknown')"
+        echo "  Exit:     ${LYNIS_EXIT}"
+        echo "═══════════════════════════════════════════════════════════"
+        echo ""
+        echo "──── Hardening Index ─────────────────────────────────────"
+        grep -E '^hardening_index=' "${LYNIS_REPORT}" || echo "hardening_index=UNAVAILABLE"
+        echo ""
+        echo "──── Warnings ────────────────────────────────────────────"
+        grep -E '^warning\[\]=' "${LYNIS_REPORT}" || echo "(none)"
+        echo ""
+        echo "──── Suggestions ─────────────────────────────────────────"
+        grep -E '^suggestion\[\]=' "${LYNIS_REPORT}" || echo "(none)"
+        echo ""
+        echo "──── Full Report Data ────────────────────────────────────"
+        cat "${LYNIS_REPORT}"
+    } > "${DEST_FILE}" 2>/dev/null && chmod 644 "${DEST_FILE}" 2>/dev/null
+
+    if [[ $? -eq 0 ]]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Report shipped to ${DEST_FILE}"
+    else
+        echo "[WARN] Failed to ship report to ${DEST_FILE} (stale mount?)" >&2
+    fi
+else
+    echo "[WARN] Log destination ${LOG_DEST_BASE} does not exist and could not be created; skipping log shipping" >&2
 fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Done."
