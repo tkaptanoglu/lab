@@ -19,7 +19,7 @@
 
 - name: Generate kubeadm join command (force admin kubeconfig; avoids residue from bad defaults)
   ansible.builtin.command:
-    cmd: "sudo KUBECONFIG=/etc/kubernetes/admin.conf kubeadm token create --print-join-command"
+    cmd: "KUBECONFIG=/etc/kubernetes/admin.conf kubeadm token create --print-join-command"
   register: join_cmd
   when: must_generate_join
   changed_when: true
