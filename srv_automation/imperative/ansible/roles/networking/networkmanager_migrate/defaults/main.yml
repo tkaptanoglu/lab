@@ -23,8 +23,8 @@ networkmanager_migrate_disable_units:
   - netplan-wpa-wlan0.service
 
 # How long to wait for SSH to come back after cutover
-networkmanager_migrate_wait_for_connection_timeout: 600
-networkmanager_migrate_wait_for_connection_delay: 2
+networkmanager_migrate_wait_for_connection_timeout: 1200
+networkmanager_migrate_wait_for_connection_delay: 5
 
 # How long to retry post-cutover verification
 networkmanager_migrate_verify_retries: 60
