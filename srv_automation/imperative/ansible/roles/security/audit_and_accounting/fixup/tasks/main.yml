@@ -1,0 +1,42 @@
+---
+###############################################################################
+# Role: auditd_fixup
+# ==================
+# Resolves ACCT-9630: "Audit daemon is enabled with an empty ruleset."
+#
+# This happens when:
+#   a) The rules file was written to rules.d/ but augenrules wasn't run
+#   b) The auditd service started before the rules file was deployed
+#
+# This role ensures rules are loaded into the running audit daemon.
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Verify the rules file from the original audit_and_accounting role exists.
+# -------------------------------------------------------------------------
+- name: "ACCT-9630: Verify audit rules file is present"
+  ansible.builtin.stat:
+    path: /etc/audit/rules.d/lynis-hardening.rules
+  register: audit_rules_file
+
+# -------------------------------------------------------------------------
+# Run augenrules to compile all files in rules.d/ into the active ruleset
+# and load them into the running kernel audit subsystem. This is the step
+# that was missing — just placing the file in rules.d/ is not enough.
+# -------------------------------------------------------------------------
+- name: "ACCT-9630: Compile and load audit rules with augenrules"
+  ansible.builtin.command: augenrules --load
+  when: audit_rules_file.stat.exists
+  changed_when: true
+  notify: Restart auditd
+
+# -------------------------------------------------------------------------
+# Verify rules actually loaded by checking the active rule count.
+# An empty ruleset returns only the 2 default header lines.
+# -------------------------------------------------------------------------
+- name: "ACCT-9630: Verify audit rules are active"
+  ansible.builtin.command: auditctl -l
+  register: audit_rules_active
+  changed_when: false
+  failed_when: >
+    audit_rules_active.stdout_lines | length < 3

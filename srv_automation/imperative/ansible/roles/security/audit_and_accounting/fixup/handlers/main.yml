@@ -1,0 +1,4 @@
+---
+- name: Restart auditd
+  ansible.builtin.command: service auditd restart
+  changed_when: true
