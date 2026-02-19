@@ -12,7 +12,28 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Hardening Index",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "area" }
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -29,30 +50,20 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
       "id": 1,
       "options": {
-        "minVizHeight": 75,
-        "minVizWidth": 75,
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true,
-        "sizing": "auto"
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "title": "Hardening Index by Server",
-      "type": "gauge",
+      "type": "timeseries",
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "lynis_hardening_index",
+          "expr": "max by (host) (lynis_hardening_index)",
           "legendFormat": "{{host}}",
-          "refId": "A",
-          "instant": true
+          "refId": "A"
         }
       ]
     },
@@ -74,7 +85,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 6 },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 8 },
       "id": 2,
       "options": {
         "colorMode": "background",
@@ -119,7 +130,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 6 },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 8 },
       "id": 3,
       "options": {
         "colorMode": "background",
@@ -165,7 +176,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 6 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 8 },
       "id": 4,
       "options": {
         "colorMode": "background",
@@ -227,7 +238,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "id": 5,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -279,7 +290,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "id": 6,
       "options": {
         "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -323,7 +334,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
       "id": 7,
       "options": {
         "barRadius": 0.05,
@@ -447,7 +458,7 @@
           }
         ]
       },
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 26 },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 28 },
       "id": 8,
       "options": {
         "cellHeight": "sm",
@@ -557,5 +568,5 @@
   "timezone": "",
   "title": "Lynis Security Audit",
   "uid": "lynis-security-audit",
-  "version": 2
+  "version": 3
 }
