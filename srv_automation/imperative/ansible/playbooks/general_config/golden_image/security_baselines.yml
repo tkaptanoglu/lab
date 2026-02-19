@@ -52,10 +52,10 @@
     - role: roles/security/network_hardening
 
     # auditd, process accounting, sysstat
-    - role: roles/security/audit_and_accounting
+    - role: roles/security/audit_and_accounting/install
+    - role: roles/security/audit_and_accounting/fixup
 
     # AIDE, rkhunter – file integrity, malware scanning and intrusion monitoring
-    - role: roles/security/ids/aide
     - role: roles/security/ids/rkhunter
     - role: roles/security/ids/falco/installation
       vars:
@@ -84,3 +84,21 @@
 
     # Legal warning banners on /etc/issue and /etc/issue.net
     - role: roles/security/banners_and_warnings
+
+    # Activate pam_pwquality in PAM stack (AUTH-9262)
+    - role: roles/security/pam_hardening
+
+    # Tighten home directory permissions (HOME-9304)
+    - role: roles/security/home_directory_permissions
+
+    # Configure idle session timeout (SHLL/session_timeout_enabled)
+    - role: roles/security/session_timeout
+
+    # Harden Postfix where installed (MAIL-8820)
+    - role: roles/security/postfix_hardening
+
+    # Fix residual sysctl values not applied at runtime (KRNL-6000)
+    - role: roles/security/sysctl_residual_fix
+
+    # Restart services holding deleted files (LOGG-2190)
+    - role: roles/security/deleted_files_cleanup
