@@ -1,0 +1,38 @@
+---
+###############################################################################
+# Role: banners_and_warnings
+# ==========================
+# Deploys legal warning banners to deter unauthorized access.
+# /etc/issue    – displayed before local console login
+# /etc/issue.net – displayed before remote (SSH) login
+#
+# Lynis IDs addressed: BANN-7126, BANN-7130
+###############################################################################
+
+- name: "BANN-7126: Set legal warning banner for local logins (/etc/issue)"
+  ansible.builtin.copy:
+    content: |
+      ***************************************************************************
+      WARNING: This system is for authorized use only. All activity is monitored
+      and logged. Unauthorized access or use is prohibited and may be subject to
+      criminal and/or civil penalties. By continuing to use this system you
+      indicate your awareness of and consent to these terms.
+      ***************************************************************************
+    dest: /etc/issue
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "BANN-7130: Set legal warning banner for remote logins (/etc/issue.net)"
+  ansible.builtin.copy:
+    content: |
+      ***************************************************************************
+      WARNING: This system is for authorized use only. All activity is monitored
+      and logged. Unauthorized access or use is prohibited and may be subject to
+      criminal and/or civil penalties. By continuing to use this system you
+      indicate your awareness of and consent to these terms.
+      ***************************************************************************
+    dest: /etc/issue.net
+    owner: root
+    group: root
+    mode: "0644"

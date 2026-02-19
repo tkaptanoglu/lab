@@ -1,0 +1,11 @@
+---
+# auditd does not support standard systemd restart; use the service command
+- name: Restart auditd
+  ansible.builtin.command: service auditd restart
+  changed_when: true
+
+- name: Restart sysstat
+  ansible.builtin.systemd:
+    name: sysstat
+    state: restarted
+    enabled: true

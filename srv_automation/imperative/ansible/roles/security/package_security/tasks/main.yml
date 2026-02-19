@@ -1,0 +1,141 @@
+---
+###############################################################################
+# Role: package_security
+# ======================
+# Installs security-related packages recommended by Lynis, purges residual
+# configs from removed packages, and enables automatic security updates.
+#
+# Lynis IDs addressed:
+#   DEB-0280, DEB-0810, DEB-0811, DEB-0880, PKGS-7346, PKGS-7370,
+#   PKGS-7394, PKGS-7420
+###############################################################################
+
+# -------------------------------------------------------------------------
+# DEB-0280: libpam-tmpdir sets unique $TMP and $TMPDIR per PAM session,
+# preventing /tmp race condition attacks between users.
+# -------------------------------------------------------------------------
+- name: "DEB-0280: Install libpam-tmpdir for per-session temp directories"
+  ansible.builtin.apt:
+    name: libpam-tmpdir
+    state: present
+    update_cache: true
+    cache_valid_time: 3600      # Don't re-update cache if refreshed < 1 hour ago
+
+# -------------------------------------------------------------------------
+# DEB-0810: apt-listbugs queries the Debian bug tracker for critical bugs
+# in packages before APT installs them, giving the admin a chance to abort.
+# -------------------------------------------------------------------------
+- name: "DEB-0810: Install apt-listbugs to warn about critical package bugs"
+  ansible.builtin.apt:
+    name: apt-listbugs
+    state: present
+  ignore_errors: true           # May not be in Ubuntu repos; non-critical
+
+# -------------------------------------------------------------------------
+# DEB-0811: apt-listchanges shows changelogs for packages being upgraded,
+# so the admin is aware of what changes are being introduced.
+# -------------------------------------------------------------------------
+- name: "DEB-0811: Install apt-listchanges for upgrade change visibility"
+  ansible.builtin.apt:
+    name: apt-listchanges
+    state: present
+
+# -------------------------------------------------------------------------
+# DEB-0880: fail2ban monitors log files and bans IPs that show malicious
+# signs (too many password failures, exploit attempts, etc.)
+# -------------------------------------------------------------------------
+- name: "DEB-0880: Install fail2ban for intrusion prevention"
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+# -------------------------------------------------------------------------
+# Configure fail2ban with a local jail file so it protects SSH.
+# We use a separate file rather than editing jail.conf directly so that
+# package upgrades don't overwrite our settings.
+# -------------------------------------------------------------------------
+- name: "DEB-0880: Configure fail2ban SSH jail"
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.local
+    content: |
+      # Fail2ban local configuration – overrides jail.conf defaults
+      [DEFAULT]
+      # Ban hosts for 1 hour after exceeding max retries
+      bantime  = 3600
+      # Time window in which failures are counted
+      findtime = 600
+      # Number of failures before banning
+      maxretry = 5
+      # Use systemd journal for log reading (modern Ubuntu)
+      backend  = systemd
+
+      [sshd]
+      enabled  = true
+      port     = ssh
+      filter   = sshd
+      maxretry = 5
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "DEB-0880: Enable and start fail2ban"
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: true
+
+# -------------------------------------------------------------------------
+# PKGS-7370: debsums verifies installed package files against known-good
+# MD5 checksums from the package database. Useful for detecting tampering.
+# -------------------------------------------------------------------------
+- name: "PKGS-7370: Install debsums for package integrity verification"
+  ansible.builtin.apt:
+    name: debsums
+    state: present
+
+# -------------------------------------------------------------------------
+# PKGS-7394: apt-show-versions shows which installed packages have updates
+# available and from which distribution, aiding patch management.
+# -------------------------------------------------------------------------
+- name: "PKGS-7394: Install apt-show-versions for patch management"
+  ansible.builtin.apt:
+    name: apt-show-versions
+    state: present
+
+# -------------------------------------------------------------------------
+# PKGS-7420: Enable unattended-upgrades so security patches are applied
+# automatically. The package is likely already present on Ubuntu but the
+# periodic configuration may not be active.
+# -------------------------------------------------------------------------
+- name: "PKGS-7420: Install unattended-upgrades for automatic security updates"
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+
+- name: "PKGS-7420: Enable automatic security update schedule"
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+# -------------------------------------------------------------------------
+# PKGS-7346: Packages that were removed but still have config files
+# lingering on disk. These show as "rc" state in dpkg. Purge them.
+# -------------------------------------------------------------------------
+- name: "PKGS-7346: Find packages in 'rc' (removed, config-remaining) state"
+  ansible.builtin.shell: |
+    dpkg -l | awk '/^rc/ {print $2}'
+  register: rc_packages
+  changed_when: false
+
+- name: "PKGS-7346: Purge residual config files from removed packages"
+  ansible.builtin.command: "dpkg --purge {{ item }}"
+  loop: "{{ rc_packages.stdout_lines }}"
+  when: rc_packages.stdout_lines | length > 0
+  changed_when: true

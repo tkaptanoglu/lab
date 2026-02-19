@@ -1,0 +1,53 @@
+---
+###############################################################################
+# Role: network_hardening
+# =======================
+# Blacklists unused network protocols and disables USB mass storage to
+# reduce the kernel attack surface.
+#
+# Lynis IDs addressed: NETW-3200, USB-1000
+###############################################################################
+
+# -------------------------------------------------------------------------
+# NETW-3200: Blacklist uncommon network protocols not used by Kubernetes
+# or standard networking. Each protocol adds kernel attack surface.
+#   dccp  – Datagram Congestion Control Protocol
+#   sctp  – Stream Control Transmission Protocol
+#   rds   – Reliable Datagram Sockets
+#   tipc  – Transparent Inter-Process Communication
+#
+# "install <module> /bin/true" ensures that even an explicit modprobe
+# attempt does nothing. "blacklist" prevents auto-loading.
+# -------------------------------------------------------------------------
+- name: "NETW-3200: Blacklist uncommon network protocols"
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/lynis-blacklist-protocols.conf
+    content: |
+      # Lynis NETW-3200: Disable uncommon protocols not needed on this system.
+      install dccp /bin/true
+      blacklist dccp
+      install sctp /bin/true
+      blacklist sctp
+      install rds /bin/true
+      blacklist rds
+      install tipc /bin/true
+      blacklist tipc
+    owner: root
+    group: root
+    mode: "0644"
+
+# -------------------------------------------------------------------------
+# USB-1000: Disable USB mass storage driver to prevent unauthorized data
+# exfiltration via USB drives. Other USB devices (keyboard, network
+# adapters, etc.) are unaffected.
+# -------------------------------------------------------------------------
+- name: "USB-1000: Disable USB storage kernel module"
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/lynis-disable-usb-storage.conf
+    content: |
+      # Lynis USB-1000: Prevent unauthorized USB storage devices.
+      install usb-storage /bin/true
+      blacklist usb-storage
+    owner: root
+    group: root
+    mode: "0644"

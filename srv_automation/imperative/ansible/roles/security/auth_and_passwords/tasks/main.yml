@@ -1,0 +1,90 @@
+---
+###############################################################################
+# Role: auth_and_passwords
+# ========================
+# Hardens password policies, hashing configuration, default umask, and
+# installs PAM password quality enforcement.
+#
+# Lynis IDs addressed: AUTH-9230, AUTH-9262, AUTH-9286, AUTH-9328
+###############################################################################
+
+# -------------------------------------------------------------------------
+# AUTH-9262: Install libpam-pwquality which provides pam_pwquality.so –
+# a modern PAM module that enforces password complexity rules at change time.
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Install libpam-pwquality for password strength enforcement"
+  ansible.builtin.apt:
+    name: libpam-pwquality
+    state: present
+
+# -------------------------------------------------------------------------
+# AUTH-9262: Configure the quality requirements that pam_pwquality enforces.
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Configure password quality requirements"
+  ansible.builtin.copy:
+    dest: /etc/security/pwquality.conf
+    content: |
+      # Password Quality Requirements (Lynis AUTH-9262)
+      # Minimum password length
+      minlen = 12
+      # Minimum number of character classes (lower, upper, digit, other)
+      minclass = 3
+      # Maximum consecutive identical characters
+      maxrepeat = 3
+      # Reject passwords containing the username
+      usercheck = 1
+      # Enforce dictionary word checking
+      dictcheck = 1
+      # Minimum characters that must differ from old password
+      difok = 5
+    owner: root
+    group: root
+    mode: "0644"
+
+# -------------------------------------------------------------------------
+# AUTH-9230: Increase SHA-512 hashing rounds for password storage.
+# More rounds = slower brute-force attacks against /etc/shadow.
+# Default is 5000; 10000–100000 provides strong resistance.
+# -------------------------------------------------------------------------
+- name: "AUTH-9230: Configure SHA password hashing rounds (minimum)"
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^#?\s*SHA_CRYPT_MIN_ROUNDS'
+    line: "SHA_CRYPT_MIN_ROUNDS 10000"
+    state: present
+
+- name: "AUTH-9230: Configure SHA password hashing rounds (maximum)"
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^#?\s*SHA_CRYPT_MAX_ROUNDS'
+    line: "SHA_CRYPT_MAX_ROUNDS 100000"
+    state: present
+
+# -------------------------------------------------------------------------
+# AUTH-9286: Set minimum password age (prevents rapid cycling to reuse old
+# passwords) and maximum age (forces periodic rotation).
+# -------------------------------------------------------------------------
+- name: "AUTH-9286: Set minimum password age to 1 day"
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^PASS_MIN_DAYS'
+    line: "PASS_MIN_DAYS   1"
+    state: present
+
+- name: "AUTH-9286: Set maximum password age to 365 days"
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^PASS_MAX_DAYS'
+    line: "PASS_MAX_DAYS   365"
+    state: present
+
+# -------------------------------------------------------------------------
+# AUTH-9328: Tighten default umask from 022 to 027.
+# 027 = new files are not world-readable, only owner+group can access.
+# -------------------------------------------------------------------------
+- name: "AUTH-9328: Set stricter default umask (027) in login.defs"
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^UMASK'
+    line: "UMASK           027"
+    state: present

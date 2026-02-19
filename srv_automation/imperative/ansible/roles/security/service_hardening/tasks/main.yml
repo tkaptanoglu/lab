@@ -1,0 +1,66 @@
+---
+###############################################################################
+# Role: service_hardening
+# =======================
+# Disables unnecessary services to reduce attack surface and applies
+# systemd sandboxing to services we can safely restrict.
+#
+# Lynis IDs addressed: BOOT-5264
+###############################################################################
+
+# -------------------------------------------------------------------------
+# avahi-daemon: mDNS/DNS-SD service discovery. Useful on desktops for
+# automatic printer/service discovery, but unnecessary on a headless
+# Kubernetes server node and adds attack surface.
+# -------------------------------------------------------------------------
+- name: "BOOT-5264: Disable avahi-daemon (mDNS – not needed on server)"
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    state: stopped
+    enabled: false
+  ignore_errors: true             # May already be absent or masked
+
+# -------------------------------------------------------------------------
+# ModemManager: manages mobile broadband (3G/4G) modems and connections.
+# A Raspberry Pi K8s node has no modems attached.
+# -------------------------------------------------------------------------
+- name: "BOOT-5264: Disable ModemManager (no modems on this system)"
+  ansible.builtin.systemd:
+    name: ModemManager
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+# -------------------------------------------------------------------------
+# Apply systemd sandboxing to node_exporter via a drop-in override.
+# This restricts what a compromised Prometheus exporter could do:
+#   NoNewPrivileges  – cannot gain additional privileges via setuid etc.
+#   ProtectSystem    – filesystem is read-only
+#   ProtectHome      – /home, /root, /run/user are inaccessible
+#   PrivateTmp       – gets its own /tmp, isolated from other processes
+#   ProtectKernelModules  – cannot load kernel modules
+#   ProtectKernelTunables – cannot modify /proc/sys, /sys
+#   ProtectControlGroups  – cannot modify cgroup filesystem
+# -------------------------------------------------------------------------
+- name: "BOOT-5264: Create node_exporter hardening drop-in directory"
+  ansible.builtin.file:
+    path: /etc/systemd/system/node_exporter.service.d
+    state: directory
+    mode: "0755"
+
+- name: "BOOT-5264: Harden node_exporter with systemd sandboxing"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service.d/hardening.conf
+    content: |
+      [Service]
+      NoNewPrivileges=true
+      ProtectSystem=full
+      ProtectHome=true
+      PrivateTmp=true
+      ProtectKernelModules=true
+      ProtectKernelTunables=true
+      ProtectControlGroups=true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and restart node_exporter

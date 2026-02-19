@@ -1,0 +1,29 @@
+---
+###############################################################################
+# Role: lynis_upgrade
+# ===================
+# Upgrades the Lynis security auditing tool to the latest available version
+# in the configured APT repositories. This addresses the standing Lynis
+# suggestion that the installed release is more than 4 months old.
+#
+# Lynis IDs addressed: LYNIS (stale version warning)
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Refresh the APT cache first so we pick up the latest available version.
+# cache_valid_time avoids redundant refreshes if the cache is recent.
+# -------------------------------------------------------------------------
+- name: "LYNIS: Update APT cache before upgrading Lynis"
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+# -------------------------------------------------------------------------
+# Upgrade the lynis package to the latest version from the repos.
+# 'state: latest' ensures it upgrades if a newer version is available,
+# and is a no-op if already at the latest version.
+# -------------------------------------------------------------------------
+- name: "LYNIS: Upgrade Lynis to the latest available version"
+  ansible.builtin.apt:
+    name: lynis
+    state: latest

@@ -1,0 +1,45 @@
+---
+###############################################################################
+# Role: kernel_hardening
+# ======================
+# Applies sysctl parameters for kernel and network stack hardening, and
+# disables core dumps at the limits.conf level.
+#
+# Lynis IDs addressed: KRNL-6000, KRNL-5820
+###############################################################################
+
+# -------------------------------------------------------------------------
+# KRNL-6000: Apply all sysctl parameters defined in vars/main.yml.
+# Written to a dedicated file so they don't conflict with other configs.
+# -------------------------------------------------------------------------
+- name: "KRNL-6000: Apply kernel and network hardening sysctl parameters"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-lynis-hardening.conf
+    reload: true
+    state: present
+  loop: "{{ sysctl_hardening | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} = {{ item.value }}"
+  notify: Reload sysctl
+
+# -------------------------------------------------------------------------
+# KRNL-5820: Disable core dumps via /etc/security/limits.conf.
+# Core dumps can contain passwords, encryption keys, and other secrets.
+# -------------------------------------------------------------------------
+- name: "KRNL-5820: Set hard limit for core dumps to 0"
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.conf
+    regexp: '^\*.*hard.*core'
+    line: "* hard core 0"
+    insertbefore: '^# End of file'
+    state: present
+
+- name: "KRNL-5820: Set soft limit for core dumps to 0"
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.conf
+    regexp: '^\*.*soft.*core'
+    line: "* soft core 0"
+    insertbefore: '^# End of file'
+    state: present

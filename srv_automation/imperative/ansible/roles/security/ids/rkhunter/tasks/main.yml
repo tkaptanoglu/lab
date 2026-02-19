@@ -1,0 +1,37 @@
+---
+###############################################################################
+# Role: intrusion_detection
+# =========================
+# Installs and initializes scanning (rkhunter) tools.
+#
+# Lynis IDs addressed: HRDN-7230
+###############################################################################
+
+# -------------------------------------------------------------------------
+# HRDN-7230: rkhunter checks for known rootkits, backdoors, and local
+# exploits by comparing system binaries against known-good signatures.
+# -------------------------------------------------------------------------
+- name: "HRDN-7230: Install rkhunter malware scanner"
+  ansible.builtin.apt:
+    name: rkhunter
+    state: present
+
+# Tell rkhunter to automatically refresh its file properties database
+# after apt package installations so it doesn't flag legitimate updates.
+- name: "HRDN-7230: Configure rkhunter to auto-update after package changes"
+  ansible.builtin.lineinfile:
+    path: /etc/default/rkhunter
+    regexp: '^#?\s*APT_AUTOGEN='
+    line: 'APT_AUTOGEN="yes"'
+    state: present
+
+# Initialize the rkhunter properties database if it doesn't exist yet.
+- name: "HRDN-7230: Check if rkhunter database exists"
+  ansible.builtin.stat:
+    path: /var/lib/rkhunter/db/rkhunter.dat
+  register: rkhunter_db
+
+- name: "HRDN-7230: Initialize rkhunter file properties database"
+  ansible.builtin.command: rkhunter --propupd
+  when: not rkhunter_db.stat.exists
+  changed_when: true

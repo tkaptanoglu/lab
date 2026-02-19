@@ -1,0 +1,55 @@
+---
+###############################################################################
+# Variables for kernel_hardening role
+# ====================================
+# Each sysctl key is set to the Lynis-recommended "prefval".
+#
+# EXCLUDED (to preserve Kubernetes functionality):
+#   net.ipv4.conf.all.forwarding  – must stay 1 for pod routing / NodePort
+#   kernel.modules_disabled       – must stay 0 so K8s can load overlay,
+#                                   br_netfilter, veth, etc.
+###############################################################################
+
+sysctl_hardening:
+  # Disable automatic loading of TTY line disciplines (prevents exploits)
+  dev.tty.ldisc_autoload: 0
+
+  # Restrict FIFO creation in world-writable sticky dirs
+  # Value 2 = only owner can write to FIFOs in sticky directories
+  fs.protected_fifos: 2
+
+  # Prevent SUID programs from creating core dumps (information leak risk)
+  fs.suid_dumpable: 0
+
+  # Restrict access to kernel symbol addresses in /proc/kallsyms
+  # Value 2 = hide from all users, even those with CAP_SYSLOG
+  kernel.kptr_restrict: 2
+
+  # Restrict unprivileged access to perf_event_open()
+  # Value 3 = disallow for all unprivileged users
+  kernel.perf_event_paranoid: 3
+
+  # Disable magic SysRQ key completely (prevents console-level attacks)
+  kernel.sysrq: 0
+
+  # Restrict BPF usage for unprivileged users
+  kernel.unprivileged_bpf_disabled: 1
+
+  # Harden BPF JIT compiler to mitigate JIT spraying attacks
+  net.core.bpf_jit_harden: 2
+
+  # Log martian packets (packets with impossible source addresses)
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.default.log_martians: 1
+
+  # Strict reverse path filtering (anti-spoofing)
+  # K8s may override to loose (2) on individual interfaces; this sets default
+  net.ipv4.conf.all.rp_filter: 1
+
+  # Do not send ICMP redirects (this host is not a router for others)
+  net.ipv4.conf.all.send_redirects: 0
+
+  # Do not accept ICMP redirects (prevents MITM route injection)
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0

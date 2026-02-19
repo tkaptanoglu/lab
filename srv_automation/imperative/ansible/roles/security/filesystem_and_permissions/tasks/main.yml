@@ -1,0 +1,65 @@
+---
+###############################################################################
+# Role: filesystem_and_permissions
+# ================================
+# Hardens file permissions on sensitive system files, restricts compiler
+# access to root, and mounts /tmp as a hardened tmpfs.
+#
+# Lynis IDs addressed: FILE-7524, FILE-6310 (partial), HRDN-7222
+###############################################################################
+
+# -------------------------------------------------------------------------
+# FILE-7524: Restrict cron-related file and directory permissions.
+# Only root should be able to read/write crontabs and drop-in dirs.
+# -------------------------------------------------------------------------
+- name: "FILE-7524: Restrict permissions on /etc/crontab"
+  ansible.builtin.file:
+    path: /etc/crontab
+    mode: "0600"
+    owner: root
+    group: root
+
+- name: "FILE-7524: Restrict permissions on cron directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "0700"
+    owner: root
+    group: root
+  loop:
+    - /etc/cron.d
+    - /etc/cron.daily
+    - /etc/cron.hourly
+    - /etc/cron.weekly
+    - /etc/cron.monthly
+
+# -------------------------------------------------------------------------
+# HRDN-7222: Compilers help attackers compile exploits locally on the host.
+# Instead of removing them (they may be needed for maintenance), we restrict
+# execute access to root only.
+# -------------------------------------------------------------------------
+- name: "HRDN-7222: Find all world-executable compilers"
+  ansible.builtin.shell: |
+    find /usr/bin -name '*gcc*' -o -name '*g++*' -o -name '*cc' -o -name '*as' | \
+    grep -v 'gcc-ar\|gcc-nm\|gcc-ranlib' || true
+  register: compilers_found
+  changed_when: false
+
+- name: "HRDN-7222: Restrict compiler permissions to root only (o-rx)"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "o-rx"
+  loop: "{{ compilers_found.stdout_lines }}"
+  when: compilers_found.stdout_lines | length > 0
+
+# -------------------------------------------------------------------------
+# FILE-6310 (partial): We cannot create separate partitions via Ansible,
+# but we can mount /tmp as tmpfs with noexec, nosuid, nodev to prevent
+# attackers from staging executable payloads in /tmp.
+# -------------------------------------------------------------------------
+- name: "FILE-6310 (partial): Mount /tmp as tmpfs with hardened mount options"
+  ansible.posix.mount:
+    path: /tmp
+    src: tmpfs
+    fstype: tmpfs
+    opts: "defaults,noexec,nosuid,nodev,size=512M"
+    state: mounted

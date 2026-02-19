@@ -1,15 +1,62 @@
 ---
-# playbooks/golden_image/security_baselines.yml
-# Purpose: Fully remove Falco if present, reinstall Falco with classic eBPF on Ubuntu 22.04 (Raspberry Pi),
-#          install/compile the eBPF probe via falcoctl, and update Falco rules.
+###############################################################################
+# Ansible Playbook: Lynis Security Hardening (Role-Based)
+# =======================================================
+# Target:  Raspberry Pi 4B – Ubuntu 22.04.5 LTS (Kubernetes node)
+# Baseline: Lynis 3.1.3 score = 60 / 100
+# Goal:    Raise the hardening score as close to 100 as possible WITHOUT
+#          breaking:
+#            • SSH remote access (Ansible control plane)
+#            • Kubernetes services (kubelet, containerd, etcd, kube-proxy,
+#              kube-apiserver, kube-controller, kube-scheduler, flannel)
+#            • NodePort exposure (iptables / nftables rules)
+#
+# OUT OF SCOPE (intentionally skipped):
+#   - All SSH hardening suggestions (SSH-7408)
+#   - Disabling IP forwarding (K8s requires it)
+#   - Disabling kernel module loading (K8s loads modules dynamically)
+#   - Separate partitions for /home, /tmp, /var (FILE-6310 – not feasible)
+#   - Remote syslog (LOGG-2154 – needs external infrastructure)
+#   - DNS domain config (NAME-4028 – Tailscale-managed)
+#   - Unused iptables rules (FIRE-4513 – K8s-managed)
+#   - Lynis version upgrade
+###############################################################################
 
-- name: Install security baselines
+- name: Lynis Security Hardening for Kubernetes Node
   hosts: all
-  become: yes
-  vars:
-    ansible_python_interpreter: /usr/bin/python3
+  become: true
+  gather_facts: true
 
   roles:
+    # Ensure latest Lynis version
+    - role: roles/security/reporting/lynis/upgrade
+
+    # Install and configure security-related packages
+    - role: roles/security/package_security
+    - role: roles/security/patching/apt_upgrade_daily
+      vars:
+        server_autopatch_origins:
+          - "o=Ubuntu,a=${distro_codename}-security"
+          - "o=Ubuntu,a=${distro_codename}-updates"
+
+    # Sysctl kernel parameter hardening and core dump restrictions
+    - role: roles/security/kernel_hardening
+
+    # Password policies, hashing, umask, PAM quality
+    - role: roles/security/auth_and_passwords
+
+    # File permissions, /tmp hardening, compiler restrictions
+    - role: roles/security/filesystem_and_permissions
+
+    # Blacklist unused protocols, disable USB storage
+    - role: roles/security/network_hardening
+
+    # auditd, process accounting, sysstat
+    - role: roles/security/audit_and_accounting
+
+    # AIDE, rkhunter – file integrity, malware scanning and intrusion monitoring
+    - role: roles/security/ids/aide
+    - role: roles/security/ids/rkhunter
     - role: roles/security/ids/falco/installation
       vars:
         falco_reinstall_if_present: false
@@ -31,10 +78,9 @@
         # Optional: background artifact updates (off by default)
         falco_enable_artifact_follow: false
     - role: roles/security/ids/falco/email_alerts_setup
-    - role: roles/security/patching/apt_upgrade_daily
-      vars:
-        server_autopatch_origins:
-          - "o=Ubuntu,a=${distro_codename}-security"
-          - "o=Ubuntu,a=${distro_codename}-updates"
-    - role: roles/security/reporting/lynis
 
+    # Disable unnecessary services, sandbox node_exporter
+    - role: roles/security/service_hardening
+
+    # Legal warning banners on /etc/issue and /etc/issue.net
+    - role: roles/security/banners_and_warnings

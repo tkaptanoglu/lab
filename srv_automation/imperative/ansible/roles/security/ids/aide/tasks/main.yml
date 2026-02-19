@@ -1,0 +1,30 @@
+---
+###############################################################################
+# Role: intrusion_detection
+# =========================
+# Installs and initializes file integrity monitoring (AIDE)
+#
+# Lynis IDs addressed: FINT-4350
+###############################################################################
+
+# -------------------------------------------------------------------------
+# FINT-4350: AIDE (Advanced Intrusion Detection Environment) monitors
+# critical system files for unexpected changes – backdoors, rootkits,
+# unauthorized config modifications.
+# -------------------------------------------------------------------------
+- name: "FINT-4350: Install AIDE file integrity monitoring tool"
+  ansible.builtin.apt:
+    name: aide
+    state: present
+
+# Initialize AIDE's baseline database (captures the current known-good
+# filesystem state). Only run if the database doesn't already exist.
+- name: "FINT-4350: Check if AIDE database already exists"
+  ansible.builtin.stat:
+    path: /var/lib/aide/aide.db
+  register: aide_db
+
+- name: "FINT-4350: Initialize AIDE database (first run only)"
+  ansible.builtin.command: aideinit
+  when: not aide_db.stat.exists
+  changed_when: true
