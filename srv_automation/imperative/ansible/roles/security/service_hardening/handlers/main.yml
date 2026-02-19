@@ -7,10 +7,3 @@
   ansible.builtin.systemd:
     daemon_reload: true
   listen: Reload systemd and restart node_exporter
-
-- name: Restart node_exporter after sandboxing
-  ansible.builtin.systemd:
-    name: node_exporter
-    state: restarted
-  listen: Reload systemd and restart node_exporter
-  ignore_errors: true

@@ -30,37 +30,3 @@
     state: stopped
     enabled: false
   ignore_errors: true
-
-# -------------------------------------------------------------------------
-# Apply systemd sandboxing to node_exporter via a drop-in override.
-# This restricts what a compromised Prometheus exporter could do:
-#   NoNewPrivileges  – cannot gain additional privileges via setuid etc.
-#   ProtectSystem    – filesystem is read-only
-#   ProtectHome      – /home, /root, /run/user are inaccessible
-#   PrivateTmp       – gets its own /tmp, isolated from other processes
-#   ProtectKernelModules  – cannot load kernel modules
-#   ProtectKernelTunables – cannot modify /proc/sys, /sys
-#   ProtectControlGroups  – cannot modify cgroup filesystem
-# -------------------------------------------------------------------------
-- name: "BOOT-5264: Create node_exporter hardening drop-in directory"
-  ansible.builtin.file:
-    path: /etc/systemd/system/node_exporter.service.d
-    state: directory
-    mode: "0755"
-
-- name: "BOOT-5264: Harden node_exporter with systemd sandboxing"
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/node_exporter.service.d/hardening.conf
-    content: |
-      [Service]
-      NoNewPrivileges=true
-      ProtectSystem=full
-      ProtectHome=true
-      PrivateTmp=true
-      ProtectKernelModules=true
-      ProtectKernelTunables=true
-      ProtectControlGroups=true
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Reload systemd and restart node_exporter
