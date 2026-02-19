@@ -1,9 +1,0 @@
----
-# Handler: reload the systemd daemon so it picks up the new drop-in file,
-# then restart node_exporter to apply the sandboxing.
-# 'listen' is valid here because these are handlers, not tasks.
-
-- name: Reload systemd daemon
-  ansible.builtin.systemd:
-    daemon_reload: true
-  listen: Reload systemd and restart node_exporter
