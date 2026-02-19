@@ -1,0 +1,59 @@
+---
+###############################################################################
+# Role: pam_hardening
+# ===================
+# Resolves AUTH-9262: "Install a PAM module for password strength testing."
+#
+# Installing libpam-pwquality puts the .so on disk, but Lynis checks
+# whether pam_pwquality.so (or pam_cracklib.so) is actually referenced
+# in the PAM configuration stack. On Ubuntu 22.04 with pam-auth-update,
+# we need to ensure the module is activated.
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Ensure libpam-pwquality is installed (may already be from earlier role).
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Ensure libpam-pwquality is installed"
+  ansible.builtin.apt:
+    name: libpam-pwquality
+    state: present
+
+# -------------------------------------------------------------------------
+# Ensure libpam-cracklib is also installed as a fallback — Lynis checks
+# for either pam_pwquality or pam_cracklib in the PAM stack.
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Install libpam-cracklib as additional password checker"
+  ansible.builtin.apt:
+    name: libpam-cracklib
+    state: present
+  ignore_errors: true             # May conflict with pwquality on some setups
+
+# -------------------------------------------------------------------------
+# Activate pwquality in the PAM stack via pam-auth-update.
+# The --package flag tells it to enable a PAM profile non-interactively.
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Activate pam_pwquality in PAM stack"
+  ansible.builtin.command: pam-auth-update --package --enable pwquality
+  changed_when: true
+
+# -------------------------------------------------------------------------
+# Verify pam_pwquality.so appears in common-password (where Lynis checks).
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Verify pam_pwquality is in PAM common-password"
+  ansible.builtin.shell: |
+    grep -c 'pam_pwquality.so' /etc/pam.d/common-password
+  register: pwquality_check
+  changed_when: false
+  failed_when: false
+
+# -------------------------------------------------------------------------
+# If pam-auth-update didn't insert it, add it manually as a fallback.
+# It must appear BEFORE pam_unix.so in the password stack.
+# -------------------------------------------------------------------------
+- name: "AUTH-9262: Manually insert pam_pwquality into PAM stack if missing"
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/common-password
+    insertbefore: '.*pam_unix\.so.*'
+    line: "password requisite pam_pwquality.so retry=3 minlen=12 minclass=3"
+    state: present
+  when: pwquality_check.stdout | default('0') | int == 0

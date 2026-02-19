@@ -1,0 +1,36 @@
+---
+###############################################################################
+# Role: deleted_files_cleanup
+# ===========================
+# Addresses LOGG-2190: "Check what deleted files are still in use."
+#
+# This typically happens when logrotate or apt replaces a file but
+# a running process still holds a file descriptor to the old (deleted)
+# version. Restarting the affected services releases the handles.
+#
+# We target the most common offenders: cron, rsyslog, systemd-journald.
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Restart cron – the most common offender (holds deleted /tmp files).
+# -------------------------------------------------------------------------
+- name: "LOGG-2190: Restart cron to release deleted file handles"
+  ansible.builtin.systemd:
+    name: cron
+    state: restarted
+
+# -------------------------------------------------------------------------
+# Restart rsyslog – may hold deleted log files after logrotate.
+# -------------------------------------------------------------------------
+- name: "LOGG-2190: Restart rsyslog to release deleted file handles"
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: restarted
+
+# -------------------------------------------------------------------------
+# Restart systemd-journald – may hold deleted journal files.
+# -------------------------------------------------------------------------
+- name: "LOGG-2190: Restart systemd-journald to release deleted file handles"
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted

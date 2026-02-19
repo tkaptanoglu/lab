@@ -1,0 +1,40 @@
+---
+###############################################################################
+# Role: sysctl_residual_fix
+# =========================
+# Resolves residual KRNL-6000 findings where the original sysctl role
+# wrote the values to the config file but they weren't applied at runtime,
+# or were overridden by another config file loaded later.
+#
+# This role force-applies values and verifies they took effect.
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Force-apply every value from the hardening config file. The --system
+# flag loads ALL sysctl config files in order, but our file in
+# /etc/sysctl.d/99-lynis-hardening.conf has the highest numeric prefix
+# so it should win. We also apply values directly as a belt-and-suspenders.
+# -------------------------------------------------------------------------
+- name: "KRNL-6000: Force-apply fs.protected_fifos=2"
+  ansible.posix.sysctl:
+    name: fs.protected_fifos
+    value: "2"
+    sysctl_file: /etc/sysctl.d/99-lynis-hardening.conf
+    reload: true
+    state: present
+
+# -------------------------------------------------------------------------
+# Reload the entire sysctl stack to ensure no other file overrides us.
+# -------------------------------------------------------------------------
+- name: "KRNL-6000: Reload all sysctl configuration"
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+
+# -------------------------------------------------------------------------
+# Verify the value actually took effect at runtime.
+# -------------------------------------------------------------------------
+- name: "KRNL-6000: Verify fs.protected_fifos is set to 2"
+  ansible.builtin.command: sysctl -n fs.protected_fifos
+  register: fifos_value
+  changed_when: false
+  failed_when: fifos_value.stdout | trim != '2'

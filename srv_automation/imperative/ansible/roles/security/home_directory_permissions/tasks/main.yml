@@ -1,0 +1,39 @@
+---
+###############################################################################
+# Role: home_directory_permissions
+# ================================
+# Resolves HOME-9304: "Double check the permissions of home directories
+# as some might be not strict enough."
+#
+# Lynis expects home directories under /home to be 750 or stricter.
+# Ubuntu defaults to 755, which allows any user to list and read files
+# in another user's home directory.
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Find all real user home directories under /home and tighten them to 750.
+# This allows owner full access, group read/execute (needed for some
+# services), and no access for others.
+# -------------------------------------------------------------------------
+- name: "HOME-9304: Find all home directories under /home"
+  ansible.builtin.find:
+    paths: /home
+    file_type: directory
+    recurse: false
+  register: home_dirs
+
+- name: "HOME-9304: Set home directory permissions to 750"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "0750"
+  loop: "{{ home_dirs.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+# -------------------------------------------------------------------------
+# Also tighten /root to 700 (should already be, but enforce it).
+# -------------------------------------------------------------------------
+- name: "HOME-9304: Ensure /root is 700"
+  ansible.builtin.file:
+    path: /root
+    mode: "0700"

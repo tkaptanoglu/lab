@@ -1,0 +1,27 @@
+---
+###############################################################################
+# Role: session_timeout
+# =====================
+# Configures an automatic shell session timeout (TMOUT) so that idle
+# interactive sessions are terminated after a period of inactivity.
+#
+# Lynis checks for session_timeout_enabled and awards points when TMOUT
+# is configured. This does NOT affect non-interactive Ansible SSH sessions
+# because Ansible uses non-interactive shells that don't source profile.d.
+#
+# We set a generous 900 seconds (15 minutes) to avoid disrupting
+# interactive admin work while still satisfying the security requirement.
+###############################################################################
+
+- name: "SHLL: Configure shell session timeout (TMOUT=900)"
+  ansible.builtin.copy:
+    dest: /etc/profile.d/tmout.sh
+    content: |
+      # Lynis hardening: automatic logout after 15 minutes of inactivity.
+      # Applies to interactive bash/sh sessions only.
+      # Does NOT affect Ansible (non-interactive) or running scripts.
+      readonly TMOUT=900
+      export TMOUT
+    owner: root
+    group: root
+    mode: "0644"

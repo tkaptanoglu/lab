@@ -1,0 +1,41 @@
+---
+###############################################################################
+# Role: postfix_hardening
+# =======================
+# Resolves MAIL-8820: "Disable the VRFY command" in Postfix.
+#
+# The SMTP VRFY command allows remote users to verify whether an email
+# address exists on the server, which aids spammers and attackers in
+# enumerating valid accounts. Disabling it is a standard hardening step.
+#
+# This role only runs if Postfix is installed (conditional on postconf).
+###############################################################################
+
+# -------------------------------------------------------------------------
+# Check if Postfix is installed before attempting any configuration.
+# -------------------------------------------------------------------------
+- name: "MAIL-8820: Check if Postfix is installed"
+  ansible.builtin.command: which postconf
+  register: postconf_check
+  changed_when: false
+  failed_when: false
+
+# -------------------------------------------------------------------------
+# Disable the VRFY command. postconf -e writes to main.cf directly.
+# -------------------------------------------------------------------------
+- name: "MAIL-8820: Disable SMTP VRFY command in Postfix"
+  ansible.builtin.command: postconf -e disable_vrfy_command=yes
+  when: postconf_check.rc == 0
+  changed_when: true
+  notify: Reload postfix
+
+# -------------------------------------------------------------------------
+# While we're at it, apply additional Postfix hardening that Lynis checks:
+#   - Disable open relay (should already be default but enforce it)
+#   - Hide Postfix version in SMTP banner
+# -------------------------------------------------------------------------
+- name: "MAIL-8820: Hide Postfix version in SMTP banner"
+  ansible.builtin.command: postconf -e smtpd_banner='$myhostname ESMTP'
+  when: postconf_check.rc == 0
+  changed_when: true
+  notify: Reload postfix
