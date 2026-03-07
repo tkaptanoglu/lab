@@ -39,8 +39,11 @@
 # -------------------------------------------------------------------------
 - name: "HRDN-7222: Find all world-executable compilers"
   ansible.builtin.shell: |
+    set -euo pipefail
     find /usr/bin -name '*gcc*' -o -name '*g++*' -o -name '*cc' -o -name '*as' | \
     grep -v 'gcc-ar\|gcc-nm\|gcc-ranlib' || true
+  args:
+    executable: /bin/bash
   register: compilers_found
   changed_when: false
 

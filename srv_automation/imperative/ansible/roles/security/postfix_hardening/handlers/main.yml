@@ -3,4 +3,4 @@
   ansible.builtin.systemd:
     name: postfix
     state: reloaded
-  ignore_errors: true
+  failed_when: false

@@ -22,7 +22,7 @@
 
 - name: Capture docker logs (if container detected)
   ansible.builtin.shell: |
-    set -o pipefail
+    set -euo pipefail
     name="$(docker ps --format '{{"{{"}}.Names{{"}}"}}' | grep -i falco | head -n1 || true)"
     if [ -n "$name" ]; then docker logs --tail {{ falco_discovery_journal_lines }} "$name" || true; fi
   args:

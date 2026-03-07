@@ -66,7 +66,7 @@
      mountpoint -q {{ external_mount_point }};
      MOUNT_POINT={{ external_mount_point }} LOG_DIR={{ srv_logs_dir }} {{ ship_logs_install_path }}'
   register: _ship_run
-  changed_when: true
+  changed_when: false
 
 - name: Verify the log file exists where required
   become: true

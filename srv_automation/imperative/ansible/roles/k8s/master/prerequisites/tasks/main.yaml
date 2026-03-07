@@ -1,5 +1,16 @@
 ---
 # ---- Controller prerequisites (delegate to localhost) ----
+- name: Check if kubernetes.core collection is already installed on the controller
+  ansible.builtin.command:
+    cmd: >
+      ansible-galaxy collection list {{ prereq_kubernetes_core_collection }}
+  delegate_to: localhost
+  run_once: true
+  register: prereq_kubernetes_core_collection_list
+  changed_when: false
+  failed_when: false
+  when: prereq_install_kubernetes_core_collection
+
 - name: Ensure kubernetes.core collection is installed on the controller
   ansible.builtin.command:
     cmd: >
@@ -8,8 +19,9 @@
       {{ prereq_collection_install_force | ternary('--force', '') }}
   delegate_to: localhost
   run_once: true
-  changed_when: true
-  when: prereq_install_kubernetes_core_collection
+  when:
+    - prereq_install_kubernetes_core_collection
+    - prereq_kubernetes_core_collection_list.rc != 0
 
 # ---- Target prerequisites (run on each node) ----
 - name: Install target apt prerequisites for Kubernetes python client

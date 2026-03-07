@@ -3,3 +3,7 @@ helm_apt_key_url: "https://baltocdn.com/helm/signing.asc"
 helm_apt_repo: "deb https://baltocdn.com/helm/stable/debian/ all main"
 helm_package: "helm"
 
+# Optional explicit version pin for the Helm package (e.g. "3.15.1-1").
+# When empty, the latest version from the repo is used.
+helm_package_version: ""
+

@@ -1,24 +1,55 @@
 ---
-- name: Ensure curl is installed (required by Helm install script)
+- name: Ensure Helm APT prerequisites are installed
   ansible.builtin.apt:
-    name: curl
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
     state: present
     update_cache: true
   become: true
 
-- name: Download official Helm installer script (get-helm-4)
-  ansible.builtin.get_url:
-    url: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4"
-    dest: "/tmp/get_helm.sh"
-    mode: "0700"
+- name: Ensure Helm APT keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
   become: true
 
-- name: Run Helm installer script
-  ansible.builtin.command: "/tmp/get_helm.sh"
+- name: Download Helm APT key
+  ansible.builtin.get_url:
+    url: "{{ helm_apt_key_url }}"
+    dest: /etc/apt/keyrings/helm-apt-keyring.asc
+    mode: "0644"
   become: true
-  environment:
-    # Make it non-interactive
-    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+- name: Convert Helm APT key to keyring (gpg --dearmor)
+  ansible.builtin.command: >
+    gpg --dearmor -o /etc/apt/keyrings/helm-apt-keyring.gpg /etc/apt/keyrings/helm-apt-keyring.asc
+  args:
+    creates: /etc/apt/keyrings/helm-apt-keyring.gpg
+  become: true
+
+- name: Configure Helm APT repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/helm-stable.list
+    content: "{{ helm_apt_repo }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Install Helm via APT
+  ansible.builtin.apt:
+    name: >-
+      {{ helm_package }}
+      {{ (helm_package_version | default('') | string | length) > 0
+          | ternary('=' ~ helm_package_version, '') }}
+    state: present
+    update_cache: true
+  become: true
 
 - name: Verify Helm installed
   ansible.builtin.command: "helm version"

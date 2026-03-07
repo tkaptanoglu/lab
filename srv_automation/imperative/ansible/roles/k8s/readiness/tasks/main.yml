@@ -105,11 +105,12 @@
 # - Add k8s repos, MUST be these commands and these values exactly
 - name: Add Kubernetes repo (exact commands requested)
   ansible.builtin.shell: |
+    set -euo pipefail
     sudo apt update
     sudo apt install -y apt-transport-https ca-certificates curl gpg
     sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
+    curl -fsSL "{{ kubernetes_readiness_k8s_key_url }}" | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ kubernetes_readiness_k8s_deb_repo }} /' | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
     sudo apt update
   args:
     executable: /bin/bash
